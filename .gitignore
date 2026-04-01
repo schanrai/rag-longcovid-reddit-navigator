@@ -1,5 +1,5 @@
 # ── Data files (large, not for version control) ───────────────────────────────
-data/
+# Ignore data file types but track the directory itself (README + .gitkeep)
 *.jsonl
 *.json.gz
 *.parquet
