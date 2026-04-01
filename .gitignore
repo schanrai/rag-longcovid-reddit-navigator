@@ -1,0 +1,40 @@
+# ── Data files (large, not for version control) ───────────────────────────────
+data/
+*.jsonl
+*.json.gz
+*.parquet
+*.csv
+
+# ── Generated reports (re-runnable from scripts) ──────────────────────────────
+reports/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env
+
+# ── Environment variables ──────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── IDE / OS ───────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db

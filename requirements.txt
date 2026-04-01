@@ -1,0 +1,6 @@
+# Long COVID Reddit RAG — Python dependencies
+#
+# Gate analysis and schema validation use stdlib only.
+# Add packages here as the pipeline grows (embedding, vector store, etc.).
+#
+# Python >= 3.11 required (uses union type hints: X | Y, match statements)
