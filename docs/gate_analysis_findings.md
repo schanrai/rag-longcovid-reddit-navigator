@@ -1,10 +1,10 @@
 # Gate Analysis Findings — Long COVID Reddit RAG
 
 **Date:** 2026-03-30
-**Last updated:** 2026-03-31 (v4 — v2 report figures confirmed, thanks_count signal added, agreement_count architectural correction)
-**Source data:** `gate_analysis_report_v2.json` (generated 2026-03-31T16:33:55 UTC, locked thresholds)
+**Last updated:** 2026-04-01 (v5 — v3 report figures confirmed, content exclusion analysis added, chunking decisions locked)
+**Source data:** `gate_analysis_report_v3.json` (generated 2026-03-31, locked thresholds + social signals)
 **Script:** `gate_analysis.py`
-**Status:** ✅ All gate decisions locked — two new metadata signals added to scope (thanks_count, agreement_count on comments)
+**Status:** ✅ All gate decisions locked — social signals confirmed — content exclusion rules locked — ready for chunking
 
 ---
 
@@ -20,7 +20,7 @@
 | **Indexable corpus (Gate 2 + score ≥ 0)** | **160,231** | **51.3%** |
 | Gate 2 failures (< 25 words) | 150,541 | 48.2% |
 | Agreement detected in failures | 6,120 | 4.1% of failures |
-| Thanks/acknowledgement detected in failures | 12,593 | 8.6% of failures |
+| Thanks/acknowledgement detected in failures | 11,515 | 7.6% of failures |
 
 **Score distribution (for ranking signal at retrieval):**
 
@@ -297,11 +297,13 @@ Two metadata signals are now in scope for v1, following mentor review and data a
 | Metric | Value |
 |---|---|
 | Gate 2 failures (< 25 words) | 150,541 |
-| Thanks/acknowledgement detected | **12,593 (8.6%)** |
-| → Reply to a specific comment (t1_) | 10,734 (85.2%) |
-| → Reply to a post (t3_) | 1,859 (14.8%) |
+| Thanks/acknowledgement detected | **11,515 (7.6%)** |
+| → Reply to a specific comment (t1_) | 9,715 (84.4%) |
+| → Reply to a post (t3_) | 1,800 (15.6%) |
 
-12,593 is more than double the agreement signal (6,120). 85.2% are directed at specific comments — confirming this lives on comments, not just posts.
+*Note: Figures updated from `gate_analysis_report_v3.json` (2026-03-31). Earlier estimate of 12,593 was measured with slightly different heuristic parameters.*
+
+11,515 is nearly double the agreement signal (6,120). 84.4% are directed at specific comments — confirming this lives on comments, not just posts.
 
 **Sample thanks comments:**
 
@@ -325,7 +327,30 @@ Two metadata signals are now in scope for v1, following mentor review and data a
 
 ---
 
-## 9. Decision Register (Final)
+## 9. Content Exclusion Analysis (2026-04-01)
+
+Beyond the gates (word count and score floor), certain comments should be excluded at ingestion based on content type. Analysis run directly against the comments JSONL:
+
+| Category | Count | % of corpus | Decision | Rationale |
+|---|---:|---:|---|---|
+| `stickied = True` | 359 | 0.115% | ✅ **Keep** — store `stickied` as metadata | Mods sometimes sticky genuinely helpful comments (resource lists, community protocols). Only 359 comments — not worth the risk of dropping useful content. |
+| `distinguished = "moderator"` | 709 | 0.227% | ❌ **Exclude** | Auto-mod bot replies, rule reminders, removal notices. Never patient content. |
+| `body = [deleted]` | 2,655 | 0.851% | ❌ **Exclude** | No recoverable text. |
+| `body = [removed]` | 13,079 | 4.191% | ❌ **Exclude** | Mod-removed content. No recoverable text. |
+| `body` empty/null | 1 | 0.000% | ❌ **Exclude** | No content. |
+
+**Combined exclusion impact on indexable corpus:**
+
+The 16,444 exclusions (distinguished + deleted + removed + empty) overlap with other gates:
+- Most `[deleted]`/`[removed]` comments have word count = 0 or 1, so Gate 2 already catches them
+- Some `distinguished = "moderator"` comments are long enough to pass Gate 2
+- Explicit exclusion ensures none slip through regardless of gate thresholds
+
+**Note on stickied posts:** `stickied = True` also exists on posts (not just comments). The scope doc originally suggested excluding stickied posts (mod announcements). However, the same reasoning applies — some stickied posts are genuinely useful resource compilations. **Decision: keep stickied posts too, store as metadata only.** The synthesis layer can use `stickied` as a context signal if needed.
+
+---
+
+## 10. Decision Register (Final)
 
 | # | Decision | Locked value | Status | Rationale |
 | --- | --- | --- | --- | --- |
@@ -335,11 +360,14 @@ Two metadata signals are now in scope for v1, following mentor review and data a
 | D4 | **Agreement heuristic** | v2 (widened) — 4.1% detection at 25-word threshold | ✅ Locked for v1 | Detection rate confirmed against locked threshold. Diminishing returns on further expansion. |
 | D5 | **`agreement_count` metadata** | On posts AND comments | ✅ In scope v1 | Architectural correction: agreement signals reply to comments (85%+) not just posts. Must attach to both. |
 | D6 | **Gate 2 at 25 words** | Adopted | ✅ Locked — see D1 | |
-| D7 | **`thanks_count` metadata** | On posts AND comments | ✅ In scope v1 | 12,593 signals (8.6% of Gate 2 failures), 85% directed at comments. Volume justifies v1 build. Utility signal — distinct from agreement's prevalence signal. |
+| D7 | **`thanks_count` metadata** | On posts AND comments | ✅ In scope v1 | 11,515 signals (7.6% of Gate 2 failures), 84% directed at comments. Volume justifies v1 build. Utility signal — distinct from agreement's prevalence signal. |
+| D8 | **Stickied comments** | Keep — store as metadata | ✅ Locked | Only 359 comments (0.1%). Some are genuinely useful resource lists. Not worth excluding. |
+| D9 | **Distinguished = moderator** | Exclude at ingestion | ✅ Locked | 709 comments. Auto-mod and mod notices — never patient content. |
+| D10 | **`[deleted]` / `[removed]` body** | Exclude at ingestion | ✅ Locked | 15,734 comments (5.0%). No recoverable text. Gate 2 catches most, explicit exclusion ensures none slip through. |
 
 ---
 
-## 9. Challenges and Risks (Resolved)
+## 11. Challenges and Risks
 
 | # | Challenge | Resolution |
 | --- | --- | --- |
@@ -351,25 +379,33 @@ Two metadata signals are now in scope for v1, following mentor review and data a
 
 ---
 
-## 10. Next Steps
+## 12. Next Steps
 
-### Do next (open new chat — implementation)
-1. **Update `gate_analysis.py`** with two new metadata signals:
-   - Add `thanks_count` heuristic (keyword-based, same architecture as agreement heuristic)
-   - Fix `agreement_count` to attach to both posts AND comments — not posts only
-   - Re-run and generate `gate_analysis_report_v3.json` confirming per-document signal counts
-2. **Proceed to `chunk_data.py`** — gates are locked:
+### Completed
+1. ~~**Update `gate_analysis.py`** with two new metadata signals~~ — ✅ Done (2026-03-31). `gate_analysis_report_v3.json` generated with `agreement_count` + `thanks_count` per parent, t3/t1 breakdowns confirmed.
+
+### Do next
+2. **Build `chunk_data.py`** — all ingestion rules locked:
    - Gate 2: word count ≥ 25
-   - Gate 1: dropped — `comment.score` stored as metadata, score < 0 excluded
-   - Chunk metadata must include: `comment.score`, `agreement_count`, `thanks_count`
-3. **Update `long-covid-rag-scope-v2.md`** — reflect Path B architecture, score-as-ranking-signal, and both new metadata fields in Section 4.3 and Section 5.4.
+   - Score floor: `comment.score ≥ 0` (score < 0 excluded)
+   - Content exclusions: `distinguished = "moderator"`, `body = [deleted]`, `body = [removed]`, empty body
+   - Chunk size: max 200 words, 20-word overlap (~10%)
+   - Store atoms separately: `text` (raw chunk body), `post_title`, `post_summary` (null for v1 — deferred to enrichment pass)
+   - Compose embedding input at embed time: `post_title + text` (+ `post_summary` when available)
+   - Metadata per chunk: `comment.score`, `agreement_count`, `thanks_count`, `parent_id`, `link_id`, `nest_level`, `is_submitter`, `stickied`, `created_utc`, `chunk_index`, `total_chunks`, `word_count`
+3. **Update `long-covid-rag-scope-v2.md`** — reflect:
+   - Path B architecture (score-as-ranking-signal, not binary gate)
+   - Content exclusion rules (D8–D10)
+   - Both social signal metadata fields (`agreement_count`, `thanks_count`) in Section 4.3
+   - Locked chunking parameters in Section 6
 
 ### Can defer to v2
 4. Time-based analysis of score distributions (do thresholds behave differently across 2020 vs 2025?).
 5. Academic research on Reddit community dynamics / social hierarchy signals for future Gate 1 design.
+6. LLM-generated post summaries (`post_summary` enrichment pass) — architecture ready, deferred until after initial embedding + eval.
 
 ---
 
-*Machine-readable results: `gate_analysis_report_v2.json` (locked thresholds), `gate_analysis_report.json` (v1 at 50-word threshold)*
-*Analysis script: `gate_analysis.py`*
-*Schema findings: `schema_report.json`, `coverage_report.json`*
+*Machine-readable results: `gate_analysis_report_v3.json` (locked thresholds + social signals), `gate_analysis_report_v2.json` (v2), `gate_analysis_report.json` (v1 at 50-word threshold)*
+*Analysis script: `src/gate_analysis.py`*
+*Schema findings: `reports/schema_report.json`, `reports/coverage_report.json`*
