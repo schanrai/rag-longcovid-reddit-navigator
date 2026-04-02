@@ -33,16 +33,27 @@ fb9d6962829aa834a789e8871852fd45425aa28fe0f6c7ec1ae7c7669724ec91 -> data/r_LongC
 
 ## Generated files (gitignored — re-generate with pipeline)
 
-These are produced by `src/chunk_data.py` from the source files above.
+### Chunking (`src/chunk_data.py`)
 
 | File | Size | Records | How to regenerate |
 |---|---|---|---|
-| `comment_chunks.jsonl` | ~135 MB | 164,812 chunks | `python3 src/chunk_data.py` |
+| `comment_chunks.jsonl` | ~135+ MB | 164,812 chunks | `python3 src/chunk_data.py` then re-run enrichment if you need `post_summary` |
 | `post_chunks.jsonl` | ~22 MB | 19,443 chunks | `python3 src/chunk_data.py` |
 
-**Parameters (locked):** 300 words max / 30-word overlap. See `docs/embedding-model-selection.md` and scope doc Section 6.1 for rationale.
+**Parameters (locked):** 300 words max / 30-word overlap. See `docs/embedding-model-selection.md` and scope doc Section 6.1.
 
-**Pipeline summary** (exclusion counts, chunk stats) is written to `reports/chunk_report.json` on each run.
+**Pipeline summary** (exclusion counts, chunk stats): `reports/chunk_report.json`.
+
+### Comment enrichment (`src/enrich_summaries.py`)
+
+| File | Role |
+|---|---|
+| `post_summaries.json` | Checkpoint: `post_id` → summary string (Pass A). Resumable. |
+| `comment_chunks_enriched.jsonl` | Pass B output before rename; safe to delete after promoting. |
+| **`comment_chunks.jsonl`** | **Canonical comment chunks** — after enrichment, includes `post_summary` where the parent post was summarizable. |
+| `comment_chunks_non_enriched.jsonl` | Optional local backup of chunk output **before** `post_summary` fill (same row count as `comment_chunks.jsonl`; rename as you prefer, e.g. `comment_chunks_pre_enrich.jsonl`). |
+
+**Report:** `reports/enrich_report.json`.
 
 ---
 
@@ -50,4 +61,4 @@ These are produced by `src/chunk_data.py` from the source files above.
 
 | File | Notes |
 |---|---|
-| `chunks.jsonl` | Previous run at 200/20 params — kept locally for reference, superseded by `comment_chunks.jsonl` |
+| `chunks.jsonl` | Older run at 200/20 params — superseded by `comment_chunks.jsonl` |
