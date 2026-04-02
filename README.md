@@ -26,6 +26,9 @@ Arctic Shift dump (NDJSON)
   chunk_data.py        — chunk + attach metadata (agreement_count, thanks_count, score)
         │
         ▼
+  enrich_summaries.py  — LLM post summaries → post_summary on comment chunks (OpenRouter)
+        │
+        ▼
   embed + index        — vector store (TBD)
         │
         ▼
@@ -66,12 +69,25 @@ rag-longcovid-reddit-navigator/
 
 ## Running the scripts
 
+Install dependencies (recommended: project virtualenv):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
 ```bash
 # Schema validation (generates reports/schema_report.json, reports/coverage_report.json)
 python3 src/validate_schema.py
 
 # Gate analysis (generates reports/gate_analysis_report_v3.json)
 python3 src/gate_analysis.py
+
+# Chunking (data/comment_chunks.jsonl, data/post_chunks.jsonl)
+python3 src/chunk_data.py
+
+# Post summaries for comment context — needs OPENROUTER_API_KEY in .env (see .env.example)
+python3 src/enrich_summaries.py
 ```
 
 ## Data source

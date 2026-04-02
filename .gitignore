@@ -1,5 +1,7 @@
 # ── Data files (large, not for version control) ───────────────────────────────
 # Ignore data file types but track the directory itself (README + .gitkeep)
+data/post_summaries.json
+data/comment_chunks_enriched.jsonl
 *.jsonl
 *.json.gz
 *.parquet
