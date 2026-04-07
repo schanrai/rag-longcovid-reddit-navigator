@@ -88,6 +88,9 @@ python3 src/chunk_data.py
 
 # Post summaries for comment context — needs OPENROUTER_API_KEY in .env (see .env.example)
 python3 src/enrich_summaries.py
+
+# Phase 1b — candidate chunks for golden-query labeling (needs data/golden_queries.json + chunk JSONL)
+python3 src/suggest_eval_chunks.py
 ```
 
 ## Data source
