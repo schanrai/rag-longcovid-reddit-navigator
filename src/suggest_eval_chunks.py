@@ -228,16 +228,14 @@ def run(cfg: Config) -> dict[str, Any]:
     lines.append("## How to use")
     lines.append("")
     lines.append(
-        "1. For each query, skim candidates. Note `chunk_id` values that are truly relevant "
-        "to the **user query** (not just keyword overlap)."
+        "This report is a reference for understanding what chunks exist per query category. "
+        "The top-ranked candidates (by term hits + score) are used as **auto-selected positives** "
+        "in `build_eval_corpus.py` — no manual labeling required."
     )
+    lines.append("")
     lines.append(
-        "2. Add to `data/golden_queries.json` under that query's `labeled_relevant` as "
-        '`{"chunk_id": "t1_…", "relevance": 3}` (1 = weak, 2 = partial, 3 = strong).'
-    )
-    lines.append(
-        "3. Run `build_eval_corpus.py` (when added) to merge positives + random distractors into "
-        "`data/eval_corpus.jsonl`."
+        "To build the eval corpus: `python3 src/build_eval_corpus.py` "
+        "(reads this manifest + chunk JSONL files, adds random distractors, writes `data/eval_corpus.jsonl`)."
     )
     lines.append("")
     lines.append("---")
@@ -264,8 +262,12 @@ def run(cfg: Config) -> dict[str, Any]:
             lines.append("")
             continue
 
-        lines.append("| chunk_id | src | vote | hits | hint | post_title | text_preview |")
-        lines.append("|----------|-----|------|------|------|------------|--------------|")
+        lines.append(
+            "| chunk_id | src | vote | hits | hint | post_title | text_preview |"
+        )
+        lines.append(
+            "|----------|-----|------|------|------|------------|--------------|"
+        )
         for r in rows:
             hint = r.title_hint or "—"
             title_esc = r.post_title.replace("|", "\\|")

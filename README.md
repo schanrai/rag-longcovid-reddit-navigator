@@ -89,8 +89,13 @@ python3 src/chunk_data.py
 # Post summaries for comment context — needs OPENROUTER_API_KEY in .env (see .env.example)
 python3 src/enrich_summaries.py
 
-# Phase 1b — candidate chunks for golden-query labeling (needs data/golden_queries.json + chunk JSONL)
+# Phase 1b — generate candidate chunk manifest for eval corpus (needs data/golden_queries.json + chunk JSONL)
+# Output: reports/eval_candidate_report.md  (reference only; used by build_eval_corpus.py)
 python3 src/suggest_eval_chunks.py
+
+# Phase 1b (cont.) — build eval corpus: auto-select positives + random distractors
+# Output: data/eval_corpus.jsonl
+python3 src/build_eval_corpus.py
 ```
 
 ## Data source

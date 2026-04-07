@@ -23,8 +23,14 @@
    python3 src/suggest_eval_chunks.py
    ```
 
-   Outputs `reports/eval_candidate_report.md` (and `.manifest.json`). Skim per query, then add chosen chunks to `labeled_relevant` as `{"chunk_id": "…", "relevance": 1|2|3}`.
+   Outputs `reports/eval_candidate_report.md` (and `.manifest.json`). In each table, fill the **relevance (1–3)** column (leave blank to skip).
 
-4. When labels are in place, continue with **eval corpus assembly** (`build_eval_corpus.py` — distractors + `eval_corpus.jsonl`).
+4. Merge labels into JSON:
+
+   ```bash
+   python3 src/ingest_eval_labels_from_report.py --report reports/eval_candidate_report.md
+   ```
+
+5. When labels are in place, continue with **eval corpus assembly** (`build_eval_corpus.py` — distractors + `eval_corpus.jsonl`).
 
 Do not fill `labeled_relevant` until the query text is final enough to judge relevance against.
