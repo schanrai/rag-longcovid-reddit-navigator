@@ -8,9 +8,8 @@ Scans comment_chunks.jsonl and post_chunks.jsonl once. For each golden query:
   - Queries with category "emotional" also match sentiment-style patterns on post_title only.
   - Queries with category "benefits" also match disability/SSDI-style patterns on post_title.
 
-Writes a Markdown report for human review. After you pick chunk_ids and relevance (1–3),
-merge them into data/golden_queries.json as labeled_relevant, then run build_eval_corpus.py
-(when implemented).
+Writes a Markdown report. Top candidates feed build_eval_corpus.py as auto-selected positives
+(Option B: LLM-as-judge eval — no manual relevance column).
 
 Usage:
   python3 src/suggest_eval_chunks.py
