@@ -4,6 +4,17 @@
 # Add packages here as the pipeline grows (embedding, vector store, etc.).
 #
 # Python >= 3.11 required (uses union type hints: X | Y, match statements)
+#
+# --- Install (PEP 668 / Homebrew Python) ---
+# Do not `pip install` into the system interpreter — use a venv:
+#   cd projects/rag-longcovid-reddit-navigator
+#   python3 -m venv .venv
+#   source .venv/bin/activate          # Windows: .venv\Scripts\activate
+#   pip install -U pip
+#   pip install -r requirements.txt
+# Optional CPU-only torch first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
 
 httpx>=0.27
 python-dotenv>=1.0

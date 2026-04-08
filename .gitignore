@@ -9,6 +9,7 @@ data/comment_chunks_enriched.jsonl
 
 # ── Generated reports (re-runnable from scripts) ──────────────────────────────
 reports/
+scratchpad.md
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
