@@ -50,6 +50,7 @@ class Config:
     out_path: Path
     max_per_query: int
     text_preview_len: int
+    max_per_link_id: int = 3  # max candidates per parent post per query
 
 
 def load_queries(path: Path) -> list[dict[str, Any]]:
@@ -115,10 +116,30 @@ def chunk_source_label(rec: dict[str, Any]) -> str:
     return "comment" if "comment_id" in rec else "post"
 
 
+def _parent_post_id(rec: dict[str, Any]) -> str:
+    """
+    Return the root post id (t3_XXXX) for any chunk, used to cap candidates
+    per parent thread. Comment chunks store link_id; post chunks store post_id.
+    """
+    link = rec.get("link_id")
+    if link:
+        return str(link)
+    pid = rec.get("post_id")
+    if pid:
+        return f"t3_{pid}"
+    cid = rec.get("chunk_id") or ""
+    if cid.startswith("t3_"):
+        parts = cid.split("_")
+        if len(parts) >= 3:
+            return f"t3_{parts[1]}"
+    return cid
+
+
 @dataclass
 class CandidateRow:
     score: int
     chunk_id: str
+    link_id: str  # root post id (t3_XXXX) for per-thread dedup
     source: str
     post_title: str
     text_preview: str
@@ -141,7 +162,6 @@ def consider_queries_for_chunk(
 ) -> None:
     hay = _haystack(rec)
     title_raw = rec.get("post_title") or ""
-    title_l = title_raw.lower()
     chunk_id = rec.get("chunk_id") or ""
     if not chunk_id:
         return
@@ -151,6 +171,7 @@ def consider_queries_for_chunk(
     text = (rec.get("text") or "").replace("\n", " ")
     preview = text[:preview_len] + ("…" if len(text) > preview_len else "")
     title_display = title_raw[:200]
+    link_id = _parent_post_id(rec)
 
     for q in queries:
         qid = q.get("id")
@@ -182,6 +203,7 @@ def consider_queries_for_chunk(
         row = CandidateRow(
             score=score,
             chunk_id=chunk_id,
+            link_id=link_id,
             source=src,
             post_title=title_display,
             text_preview=preview,
@@ -196,10 +218,33 @@ def consider_queries_for_chunk(
             heapq.heapreplace(bucket, row)
 
 
+def _apply_per_link_cap(
+    rows: list[CandidateRow],
+    max_per_link_id: int,
+) -> list[CandidateRow]:
+    """
+    Greedy-select from score-descending list, keeping at most max_per_link_id
+    candidates per parent post (link_id). Preserves overall score ordering.
+    """
+    if max_per_link_id <= 0:
+        return rows
+    counts: dict[str, int] = {}
+    out: list[CandidateRow] = []
+    for row in rows:
+        n = counts.get(row.link_id, 0)
+        if n < max_per_link_id:
+            out.append(row)
+            counts[row.link_id] = n + 1
+    return out
+
+
 def resolve_top_candidates(cfg: Config) -> dict[str, list[CandidateRow]]:
     """
     Scan comment + post chunk JSONL once and return top candidate rows per golden query
     (same ranking as the Markdown report). Used by build_eval_corpus.py.
+
+    Per-thread cap (cfg.max_per_link_id) is applied after sorting so each parent
+    post contributes at most that many candidates per query.
     """
     queries = load_queries(cfg.golden_path)
     tops: dict[str, list[CandidateRow]] = {}
@@ -219,7 +264,8 @@ def resolve_top_candidates(cfg: Config) -> dict[str, list[CandidateRow]]:
     for q in queries:
         qid = str(q.get("id") or "")
         heap = tops.get(qid, [])
-        resolved[qid] = sorted(heap, key=lambda r: r.score, reverse=True)
+        sorted_rows = sorted(heap, key=lambda r: r.score, reverse=True)
+        resolved[qid] = _apply_per_link_cap(sorted_rows, cfg.max_per_link_id)
     return resolved
 
 
@@ -332,6 +378,12 @@ def main() -> None:
     )
     ap.add_argument("--max-per-query", type=int, default=25)
     ap.add_argument("--preview-len", type=int, default=180)
+    ap.add_argument(
+        "--max-per-link-id",
+        type=int,
+        default=3,
+        help="Max candidates per parent post (link_id) per query. 0 = no cap.",
+    )
     args = ap.parse_args()
 
     cfg = Config(
@@ -342,6 +394,7 @@ def main() -> None:
         out_path=args.out,
         max_per_query=args.max_per_query,
         text_preview_len=args.preview_len,
+        max_per_link_id=args.max_per_link_id,
     )
 
     if not cfg.golden_path.exists():
