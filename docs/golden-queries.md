@@ -11,8 +11,6 @@
 | `category` | `symptom` \| `treatment` \| `timeline` \| `prevalence` \| `emotional` \| `benefits` \| `meta` |
 | `expected_terms` | Hints for search / labeling — terms often present in relevant chunks |
 | `notes` | What “good retrieval” looks like for this query |
-| `labeled_relevant` | **Leave empty until you finish review.** Later: list of `{ "chunk_id", "relevance" }` where `relevance` is 1–3 (Phase 1b) |
-
 ## Your review
 
 1. Edit queries, categories, `expected_terms`, and `notes` in `golden_queries.json` to match the topics you care about most for the subreddit.
@@ -23,14 +21,12 @@
    python3 src/suggest_eval_chunks.py
    ```
 
-   Outputs `reports/eval_candidate_report.md` (and `.manifest.json`). In each table, fill the **relevance (1–3)** column (leave blank to skip).
+   Outputs `reports/eval_candidate_report.md` (and `.manifest.json`). Top candidates are auto-selected as positives for the eval corpus (Option B — LLM-as-judge, no manual labeling).
 
-4. Merge labels into JSON:
+4. Build the eval corpus (auto-selected positives + random distractors at 75/25 neg/pos ratio):
 
    ```bash
-   python3 src/ingest_eval_labels_from_report.py --report reports/eval_candidate_report.md
+   python3 src/build_eval_corpus.py
    ```
 
-5. When labels are in place, continue with **eval corpus assembly** (`build_eval_corpus.py` — distractors + `eval_corpus.jsonl`).
-
-Do not fill `labeled_relevant` until the query text is final enough to judge relevance against.
+   Outputs `data/eval_corpus.jsonl` (~2,000 chunks) + `data/eval_corpus_positives.json`.

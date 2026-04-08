@@ -197,7 +197,11 @@ def consider_queries_for_chunk(
             heapq.heapreplace(bucket, row)
 
 
-def run(cfg: Config) -> dict[str, Any]:
+def resolve_top_candidates(cfg: Config) -> dict[str, list[CandidateRow]]:
+    """
+    Scan comment + post chunk JSONL once and return top candidate rows per golden query
+    (same ranking as the Markdown report). Used by build_eval_corpus.py.
+    """
     queries = load_queries(cfg.golden_path)
     tops: dict[str, list[CandidateRow]] = {}
 
@@ -212,12 +216,17 @@ def run(cfg: Config) -> dict[str, Any]:
                 print(f"  … scanned {n:,} lines from {path.name}", file=sys.stderr)
         print(f"  Done {path.name}: {n:,} chunks", file=sys.stderr)
 
-    # Build sorted lists (descending score)
     resolved: dict[str, list[CandidateRow]] = {}
     for q in queries:
         qid = str(q.get("id") or "")
         heap = tops.get(qid, [])
         resolved[qid] = sorted(heap, key=lambda r: r.score, reverse=True)
+    return resolved
+
+
+def run(cfg: Config) -> dict[str, Any]:
+    resolved = resolve_top_candidates(cfg)
+    queries = load_queries(cfg.golden_path)
 
     cfg.out_path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
