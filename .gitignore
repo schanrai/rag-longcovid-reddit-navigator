@@ -9,7 +9,8 @@ data/comment_chunks_enriched.jsonl
 
 # ── Generated reports (re-runnable from scripts) ──────────────────────────────
 reports/
-scratchpad.md
+docs/scratchpad.md
+docs/mac-long-jobs-and-logs.md
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
@@ -41,6 +42,7 @@ env/
 *.swp
 *.swo
 Thumbs.db
-docs/scratchpad.md
-docs/mac-long-jobs-and-logs.md
-docs/scratchpad.md
+
+
+
+
