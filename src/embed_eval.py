@@ -11,6 +11,9 @@ Usage:
   python3 src/embed_eval.py
   python3 src/embed_eval.py --models qwen3_embedding_0.6b voyage_4_large
   python3 src/embed_eval.py --skip-voyage   # local models only
+  python3 src/embed_eval.py --st-batch-size 8   # lower RAM (Rosetta / long chunks)
+
+Long runs: see docs/mac-long-jobs-and-logs.md (nohup, log file, Console.app).
 """
 from __future__ import annotations
 

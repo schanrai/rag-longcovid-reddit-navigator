@@ -42,3 +42,5 @@ env/
 *.swo
 Thumbs.db
 docs/scratchpad.md
+docs/mac-long-jobs-and-logs.md
+docs/scratchpad.md

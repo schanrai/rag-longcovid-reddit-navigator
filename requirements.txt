@@ -19,8 +19,14 @@
 httpx>=0.27
 python-dotenv>=1.0
 pydantic>=2.0
-numpy>=1.26
-# Phase 1c embedding eval (CPU). Install torch CPU wheels first if needed:
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Pin NumPy <2: many torch wheels are built against NumPy 1.x; NumPy 2.x can break torch import.
+numpy>=1.26,<2
+# Phase 1c embedding eval (CPU). PyTorch **CPU** index for macOS x86_64 may only publish 2.2.x — do not require 2.4+ here or `pip install -r` fails.
+# Install order (recommended):
+#   pip install "numpy>=1.26,<2"
+#   pip install "torch>=2.2,<2.3" --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
 sentence-transformers>=3.0
-torch>=2.0
+torch>=2.2,<2.3
+# transformers 5.x expects torch >=2.4; macOS x86_64 wheels stop at torch 2.2.x — stay on transformers 4.x
+transformers>=4.41,<5
