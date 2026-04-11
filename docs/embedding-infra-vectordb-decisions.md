@@ -1,10 +1,10 @@
 ---
 name: Embedding, Infrastructure & Vector DB Decisions
-overview: Eval shortlist locked (Qwen3-0.6B, Jasper-600M, Qwen3-4B, Voyage-4-Large). Vector DB and hosting path determined by eval winner — Weaviate Cloud (Voyage) or Qdrant Cloud + middle-tier container (self-hosted model). Chunking pipeline complete. Next blocker: golden query set.
+overview: Embedding model locked — Voyage-4-Large (Phase 1d LLM-judge eval, 2026-04-10). Infrastructure path — Path A (Voyage API + Weaviate Cloud). Chunking + eval corpus + embeddings complete; next — full-corpus ingest (Phase 2).
 todos:
   - id: embedding-eval
-    content: Run data-driven embedding comparison (Voyage-4-Large, Qwen3-Embedding-0.6B, Qwen3-Embedding-4B, Jasper-Token-Compression-600M) on corpus sample + golden queries; then lock model in scope doc Section 5.3
-    status: pending
+    content: "DONE (2026-04-10): Phase 1d eval — cosine top-10 + LLM judge (Gemini 2.5 Flash Lite via OpenRouter); reports/embedding_eval_report.json; Voyage-4-Large selected; scope Section 5.3 + this doc updated"
+    status: completed
   - id: lock-post-chunks
     content: Lock post chunk sizing (informed by 32k-class context, not 512) and exclusion rules
     status: done
@@ -25,7 +25,7 @@ isProject: false
 
 **Chunking and ingestion are independent of the final embedding vendor.** Atom storage (`text`, `post_title`, `post_summary`) means re-embedding with a different model is a **new embedding pass only** — no re-chunking.
 
-**What is not locked yet:** The specific model ID (API vs self-hosted) until a **data-driven comparison** on our actual corpus (informal Reddit health text), planned soon after this plan.
+**Locked (2026-04-10):** **Voyage-4-Large** (API) — see **Corpus embedding eval results** below. Self-hosted finalists (Qwen3-0.6B, Jasper-600M, Qwen3-4B) remain documented as benchmarks; production indexing uses Voyage.
 
 ---
 
@@ -212,18 +212,78 @@ The earlier rationale for excluding 7B-class models was:
 
 ## Eval dimensions (2026-04-02)
 
-The embedding model eval must measure these dimensions. Ordered by priority:
+The embedding model eval was intended to measure these dimensions. Ordered by priority:
 
-| # | Dimension | What we're measuring | Non-negotiable? |
+**⚠️ Note (updated 2026-04-10):** Only **dimension 1** (retrieval quality) was directly measured in Phase 1c–1d. Dimensions 2–8 were assessed through reasoning, observed behaviour, or known specs — not controlled benchmarks. The decision record below reflects this honestly.
+
+| # | Dimension | Assessment method | Non-negotiable? |
 |---|---|---|---|
-| 1 | **Retrieval quality** | Best results on actual Reddit corpus + golden queries. The deciding factor. | Yes |
-| 2 | **Query latency** | Must be under 15 seconds per query. | Yes — hard ceiling |
-| 3 | **Cost** | API per-token (Voyage) vs middle-tier cloud hosting (self-hosted). Must fit MVP budget. | Yes |
-| 4 | **Pipeline complexity** | Native Weaviate integration (Voyage) vs separate embedding step + vector DB. Number of moving parts. | No — but a tiebreaker |
-| 5 | **Vector dimensionality** | 1024 (Voyage) vs 8960 (gte-Qwen2) vs TBD (7B models). Affects vector DB storage cost and search speed. | No — but has cost/latency implications |
-| 6 | **Domain fit** | MTEB Medical rank is a starting signal, but corpus is informal Reddit, not clinical text. Eval on our data settles this. | Measured by #1 |
-| 7 | **Ingestion throughput** | Time to embed full 184k-chunk corpus. API rate limits may throttle Voyage; local CPU is slow but unconstrained. | No — one-time batch job, but affects iteration speed |
-| 8 | **Support ecosystem** | Voyage: docs + Weaviate native integration + reranker. Self-hosted: husband's hands-on Qdrant/sentence-transformers experience. | No — but a tiebreaker |
+| 1 | **Retrieval quality** | ✅ **Measured** — LLM-as-judge (NDCG@10, MRR@10) on actual eval corpus + 20 golden queries | Yes — deciding factor |
+| 2 | **Query latency** | ⚪ **Not measured** — Voyage API latency was not benchmarked per query. Self-hosted models were not timed at inference. Assumed acceptable for MVP. | Yes — hard ceiling (< 15s) |
+| 3 | **Cost** | ⚪ **Reasoned** — Voyage API pricing is public ($0.12/M tokens). Self-hosted hosting costs estimated but not validated on actual infra. | Yes — must fit MVP budget |
+| 4 | **Pipeline complexity** | ⚪ **Reasoned** — Voyage + Weaviate native integration is architecturally simpler than a container + Qdrant. Not empirically measured. | No — tiebreaker |
+| 5 | **Vector dimensionality** | ✅ **Known from spec** — Voyage 1024, Qwen3-0.6B 1024, Jasper 2048, Qwen3-4B 2560. Storage/latency implications reasoned, not measured. | No — has cost/latency implications |
+| 6 | **Domain fit** | ✅ **Measured via #1** — retrieval eval on actual Reddit corpus settles this; MTEB ranks were the pre-eval signal only | Measured by #1 |
+| 7 | **Ingestion throughput** | ⚪ **Observed informally** — Voyage took ~2 min for 2k eval corpus via API; self-hosted models took 30–90 min on CPU. Not benchmarked at 184k scale. | No — one-time job, but affects iteration speed |
+| 8 | **Support ecosystem** | ⚪ **Reasoned** — Voyage: Weaviate native integration + reranker. Self-hosted: CTO's hands-on Qdrant/sentence-transformers experience. | No — tiebreaker |
+
+**Decision basis:** Voyage-4-Large won decisively on dimension 1 (the deciding factor) and is favoured on dimensions 4, 5, 7, and 8 through reasoning. Dimensions 2 and 3 remain to be validated during Phase 2 (full corpus ingest) and Phase 3 (retrieval layer) — those phases will surface any latency or cost surprises before the system is user-facing.
+
+---
+
+## Corpus embedding eval results (locked 2026-04-10)
+
+**Artifacts:** `data/eval_corpus.jsonl` (~2k chunks), `data/golden_queries.json` (20 queries), per-model vectors under `data/embeddings/<model_id>/`, report `reports/embedding_eval_report.json` (schema `embedding_eval_report_v1`).
+
+**Method (Phase 1c–1d):**
+1. Embed the eval corpus + golden query strings with each shortlist model (`src/embed_eval.py`).
+2. For each model × query: **cosine similarity top-10** chunk IDs.
+3. **LLM-as-judge** (OpenRouter: `google/gemini-2.5-flash-lite`): each retrieved chunk scored **1** (not relevant), **2** (partial), **3** (highly relevant) using the golden query's `notes` / `expected_terms` as judge rubric, with chunk text composed via `compose_embedding_input`.
+4. Metrics: **NDCG@10** (graded list quality), **MRR@10** with first hit ≥ 2 as "relevant" (`src/eval_judge.py`).
+
+### Headline metrics (mean across 20 queries)
+
+| Model | Mean NDCG@10 | Mean MRR@10 |
+| --- | ---: | ---: |
+| **Voyage-4-Large** | **0.9903** | **1.0000** |
+| Jasper-Token-Compression-600M | 0.9852 | 1.0000 |
+| Qwen3-Embedding-4B | 0.9768 | 1.0000 |
+| Qwen3-Embedding-0.6B | 0.9697 | 0.9667 |
+
+### Judge score distribution (200 judgments per model = 20 queries × 10)
+
+| Model | Score 1 (irrelevant) | Score 2 (partial) | Score 3 (highly relevant) |
+| --- | ---: | ---: | ---: |
+| **Voyage-4-Large** | **3 (1.5%)** | **22 (11.0%)** | **175 (87.5%)** |
+| Jasper-Token-Compression-600M | 6 (3.0%) | 33 (16.5%) | 161 (80.5%) |
+| Qwen3-Embedding-4B | 9 (4.5%) | 47 (23.5%) | 144 (72.0%) |
+| Qwen3-Embedding-0.6B | 16 (8.0%) | 41 (20.5%) | 143 (71.5%) |
+
+Voyage leads on NDCG and surfaces the fewest irrelevant chunks in top-10 — 5× fewer score-1 results than Qwen3-0.6B.
+
+### NDCG@10 by category
+
+| Model | symptom | treatment | timeline | prevalence | emotional | benefits | meta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **Voyage-4-Large** | **0.9993** | **0.9945** | **0.9920** | **1.0000** | 0.9534 | **1.0000** | **0.9927** |
+| Jasper-600M | 0.9919 | 0.9933 | 0.9688 | 0.9896 | 0.9654 | 1.0000 | 0.9718 |
+| Qwen3-4B | 0.9915 | 0.9767 | 0.9814 | 0.9990 | 0.9372 | 1.0000 | 0.9314 |
+| Qwen3-0.6B | 0.9642 | 0.9845 | 0.9703 | 0.9977 | 0.9394 | 1.0000 | 0.9319 |
+
+**Observation:** All models are weakest on **emotional** and **meta** categories (vs symptom/treatment/benefits). Voyage is the only model at 1.0 on prevalence and ≥ 0.99 on meta. Jasper slightly edges Voyage on emotional (0.9654 vs 0.9534) and on one specific query (q19 — "LC awareness…").
+
+### Notable weak query
+
+**q19** — "LC awareness. Doctor and family don't believe me =(" — tests **abbreviated "LC"** without spelling out Long COVID. Voyage's single lowest query score (0.9188). Root cause is likely the embedding seeing only the literal query string — query rewriting (expand "LC → Long COVID") and hybrid BM25 are the production mitigations, not a reason to choose a different model.
+
+### Decision record
+
+| Field | Value |
+| --- | --- |
+| **Locked model** | `voyage-4-large` (Voyage API), 1024 dimensions |
+| **Winner rationale** | Best mean NDCG, tied best MRR (with Jasper + Qwen3-4B), fewest irrelevant top-10 results, smallest dims in shortlist, fastest full-corpus embed path, native Weaviate integration |
+| **Trade-offs accepted** | Per-query API cost; vendor dependency; mitigated by atom storage (re-embed without re-chunk if vendor changes) |
+| **Infrastructure path** | **Path A** — Voyage API + Weaviate Cloud (see "The real decision" section) |
 
 ---
 
@@ -232,5 +292,7 @@ The embedding model eval must measure these dimensions. Ordered by priority:
 1. ~~**Product:** Lock post chunk parameters and exclusions; extend scope doc Section 6 for post chunks.~~ ✅ Done (2026-04-01)
 2. ~~**Code:** Extend `chunk_data.py` for post chunking into `data/` output.~~ ✅ Done (2026-04-01)
 3. ~~**Confirm eval candidates:** Pull MTEB Medical + Social/Blog leaderboards, cross-reference, lock shortlist.~~ ✅ Done (2026-04-02). Shortlist: Qwen3-Embedding-0.6B, Jasper-Token-Compression-600M, Qwen3-Embedding-4B, Voyage-4-Large. gte-Qwen2-1.5B-instruct dropped.
-4. **Build golden query set:** 15-20 representative queries (symptom, treatment, timeline, prevalence). Blocks the entire eval.
-5. **Run embedding eval:** Compare 4 shortlisted candidates on eval dimensions (retrieval quality, latency, cost, dims, pipeline complexity). Then update [long-covid-rag-scope-v2.md](../../artifacts/module_5_context_packing/long-covid-rag-scope-v2.md) **Section 5.3** with chosen model + rationale.
+4. ~~**Build golden query set:**~~ ✅ Done — `data/golden_queries.json` (20 queries, 7 categories).
+5. ~~**Run embedding eval:**~~ ✅ Done (2026-04-10) — `reports/embedding_eval_report.json`; model locked to **Voyage-4-Large**; `long-covid-rag-scope-v3.md` Section 5.3 + this doc updated.
+6. **Phase 2 — Full corpus ingest:** Provision Weaviate Cloud, embed ~184k chunks via Voyage API, build `src/index_weaviate.py`, ingest with full metadata payload.
+7. **Cleanup (Phase 1e):** Delete `src/ingest_eval_labels_from_report.py`; remove manual relevance column from `suggest_eval_chunks.py` report (superseded by Option B eval).
