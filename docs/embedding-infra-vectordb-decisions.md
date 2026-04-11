@@ -295,4 +295,4 @@ Voyage leads on NDCG and surfaces the fewest irrelevant chunks in top-10 — 5×
 4. ~~**Build golden query set:**~~ ✅ Done — `data/golden_queries.json` (20 queries, 7 categories).
 5. ~~**Run embedding eval:**~~ ✅ Done (2026-04-10) — `reports/embedding_eval_report.json`; model locked to **Voyage-4-Large**; `long-covid-rag-scope-v3.md` Section 5.3 + this doc updated.
 6. **Phase 2 — Full corpus ingest:** Provision Weaviate Cloud, embed ~184k chunks via Voyage API, build `src/index_weaviate.py`, ingest with full metadata payload.
-7. **Cleanup (Phase 1e):** Delete `src/ingest_eval_labels_from_report.py`; remove manual relevance column from `suggest_eval_chunks.py` report (superseded by Option B eval).
+7. ~~**Cleanup (Phase 1e):**~~ ✅ Done — `ingest_eval_labels_from_report.py` was never created (Option B eval made it unnecessary from the start); `suggest_eval_chunks.py` never had a manual relevance column (already Option B). No files to delete.
