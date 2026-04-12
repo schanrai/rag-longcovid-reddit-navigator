@@ -125,13 +125,13 @@ isProject: false
 | 1 | **Qwen3-Embedding-0.6B** | 90.52 | 70.97 | 0.44B | 1024 | 32k | Self-host (sentence-transformers) + Qdrant or Weaviate |
 | 2 | **Jasper-Token-Compression-600M** | 89.92 | 78.28 | 0.45B | 2048 | 32k | Self-host (sentence-transformers) + Qdrant or Weaviate |
 | 3 | **Qwen3-Embedding-4B** | 92.92 | 75.64 | 3.6B | 2560 | 32k | Self-host (sentence-transformers) + Qdrant or Weaviate |
-| 4 | **Voyage-4-Large** | Unknown | Unknown | Unknown (API) | 1024 | 32k | API + Weaviate Cloud (native integration) |
+| 4 | **Voyage-4-Large** | Unknown | Unknown | Unknown (API) | 1024 | 32k | API + Weaviate Cloud (bring-your-own-vector) |
 
 **Why these four:**
 - **Qwen3-0.6B:** Best ratio of retrieval quality to model size. Strong Medical (90.52), decent Social/Blog (70.97), tiny (0.44B), manageable dims (1024), full 32k context. Compatible with sentence-transformers.
 - **Jasper-600M:** Strongest cross-domain performer — highest Social/Blog Retrieval (78.28) of any sub-1B model while maintaining strong Medical (89.92). 2048 dims is higher than Qwen3-0.6B but manageable.
 - **Qwen3-4B:** Highest Medical Retrieval in the shortlist (92.92) and strong Social/Blog (75.64). Included to test whether the extra 3B parameters buy meaningful retrieval quality over the 0.6B variant. Heavier on CPU — latency is the key risk.
-- **Voyage-4-Large:** Represents the API path. Zero infra, native Weaviate integration, native reranker. Not on leaderboards yet — must benchmark directly. Included because it's the simplest pipeline if retrieval quality is competitive. The Voyage family's weak Social/Blog trend (50–67 range for older models) is a concern.
+- **Voyage-4-Large:** Represents the API path. Zero infra, simplest pipeline if retrieval quality is competitive. The Voyage family's weak Social/Blog trend (50–67 range for older models) is a concern. Note: we went BYOV (see “Infrastructure paths” below) due to multi-field embedding composition.
 
 **Dropped:**
 - **gte-Qwen2-1.5B-instruct:** Outperformed by Qwen3-0.6B on both domains with 1/3 params and 1/9 dims.
@@ -142,7 +142,7 @@ isProject: false
 
 | If winner is... | Vector DB | Embedding | Infra |
 |---|---|---|---|
-| Voyage-4-Large | Weaviate Cloud (managed) | Voyage API (native integration) | Fully managed — simplest pipeline |
+| Voyage-4-Large | Weaviate Cloud (managed) | Voyage API (bring-your-own-vector) | Fully managed — simplest pipeline |
 | Any self-hosted model | Qdrant Cloud (managed) or Weaviate | sentence-transformers in container | Middle-tier cloud (Railway/Render/Fly.io) |
 
 Qdrant is preferred for the self-hosted path due to husband's hands-on experience with the Qdrant + sentence-transformers stack. Weaviate remains viable for self-hosted models via Hugging Face Hub API integration, but pulls toward managed cloud for simplicity only if using Voyage.
@@ -156,8 +156,9 @@ Qdrant is preferred for the self-hosted path due to husband's hands-on experienc
 **Weaviate:**
 - Native hybrid search (BM25 + vector + RRF fusion) out of the box — matches our retrieval architecture (scope doc Section 5.2)
 - Built-in embedding via model provider integrations — configure a model at the collection level, Weaviate handles embedding at ingest and query time automatically
-- **Voyage AI integration:** Enabled by default on Weaviate Cloud. Supports Voyage embeddings + Voyage reranker natively. Zero separate embedding step needed.
+- **Voyage AI integration:** Enabled by default on Weaviate Cloud. Supports Voyage embeddings + Voyage reranker natively. Zero separate embedding step needed — **if using the native integration. We did not use it** (see note below).
 - **Hugging Face integration:** Two modes: (1) HF Hub API — Weaviate calls HF Inference API, works on Weaviate Cloud; (2) Locally-hosted transformer container — Docker container with the model, but NOT available on Weaviate Cloud (requires self-hosted Weaviate)
+- **⚠️ Note — we use bring-your-own-vector (BYOV):** Our embedding input is a multi-field composition (`post_title + post_summary + text` via `compose_embedding_input`). The native integration embeds a single property only, which would invalidate Phase 1 eval results. We call the Voyage API in Python and pass pre-computed vectors to Weaviate at ingest time. At query time (Phase 3), the retrieval layer must also pre-compute the query vector before calling Weaviate.
 - **Implication:** Using a sentence-transformers model (Qwen3, Jasper) with Weaviate Cloud requires the HF Hub API path. Running the model directly in a container requires self-hosting Weaviate too — the worst-of-both-worlds path.
 
 **Qdrant:**
@@ -170,7 +171,7 @@ Qdrant is preferred for the self-hosted path due to husband's hands-on experienc
 ### sentence-transformers compatibility
 
 - **Voyage-4-Large:** API-only. NOT available as a sentence-transformers model. Embedding happens via Voyage API (directly or through Weaviate's native integration).
-- **Qwen3-Embedding-0.6B, Qwen3-Embedding-4B, Jasper-Token-Compression-600M:** All compatible with the sentence-transformers Python library. Can be loaded locally and used for embedding.
+- **Voyage-4-Large:** API-only. NOT available as a sentence-transformers model. Embedding happens via Voyage API, called directly from Python (bring-your-own-vector). We do not use Weaviate’s native Voyage integration.
 
 ### Hosting terminology (corrected 2026-04-02)
 
@@ -222,11 +223,11 @@ The embedding model eval was intended to measure these dimensions. Ordered by pr
 | 2 | **Query latency** | ⚪ **Not measured** — Voyage API latency was not benchmarked per query. Self-hosted models were not timed at inference. Assumed acceptable for MVP. | Yes — hard ceiling (< 15s) |
 | 3 | **Cost** | ⚪ **Reasoned** — Voyage API pricing is public ($0.12/M tokens). Self-hosted hosting costs estimated but not validated on actual infra. | Yes — must fit MVP budget |
 | 4 | **Pipeline complexity** | ⚪ **Reasoned** — Voyage + Weaviate native integration is architecturally simpler than a container + Qdrant. Not empirically measured. | No — tiebreaker |
-| 5 | **Vector dimensionality** | ✅ **Known from spec** — Voyage 1024, Qwen3-0.6B 1024, Jasper 2048, Qwen3-4B 2560. Storage/latency implications reasoned, not measured. | No — has cost/latency implications |
+| 4 | **Pipeline complexity** | ⚪ **Reasoned** — Voyage API + Weaviate (BYOV) is simpler than a container + Qdrant, but requires pre-computing vectors at query time (no auto-embed). Not empirically measured. | No — tiebreaker |
 | 6 | **Domain fit** | ✅ **Measured via #1** — retrieval eval on actual Reddit corpus settles this; MTEB ranks were the pre-eval signal only | Measured by #1 |
 | 7 | **Ingestion throughput** | ⚪ **Observed informally** — Voyage took ~2 min for 2k eval corpus via API; self-hosted models took 30–90 min on CPU. Not benchmarked at 184k scale. | No — one-time job, but affects iteration speed |
 | 8 | **Support ecosystem** | ⚪ **Reasoned** — Voyage: Weaviate native integration + reranker. Self-hosted: CTO's hands-on Qdrant/sentence-transformers experience. | No — tiebreaker |
-
+| 8 | **Support ecosystem** | ⚪ **Reasoned** — Voyage: strong API + reranker; Weaviate BYOV pattern well-documented. Self-hosted: CTO’s hands-on Qdrant/sentence-transformers experience. | No — tiebreaker |
 **Decision basis:** Voyage-4-Large won decisively on dimension 1 (the deciding factor) and is favoured on dimensions 4, 5, 7, and 8 through reasoning. Dimensions 2 and 3 remain to be validated during Phase 2 (full corpus ingest) and Phase 3 (retrieval layer) — those phases will surface any latency or cost surprises before the system is user-facing.
 
 ---
@@ -282,7 +283,7 @@ Voyage leads on NDCG and surfaces the fewest irrelevant chunks in top-10 — 5×
 | --- | --- |
 | **Locked model** | `voyage-4-large` (Voyage API), 1024 dimensions |
 | **Winner rationale** | Best mean NDCG, tied best MRR (with Jasper + Qwen3-4B), fewest irrelevant top-10 results, smallest dims in shortlist, fastest full-corpus embed path, native Weaviate integration |
-| **Trade-offs accepted** | Per-query API cost; vendor dependency; mitigated by atom storage (re-embed without re-chunk if vendor changes) |
+| **Winner rationale** | Best mean NDCG, tied best MRR (with Jasper + Qwen3-4B), fewest irrelevant top-10 results, smallest dims in shortlist, fastest full-corpus embed path. BYOV used (not native Weaviate integration) due to multi-field embedding composition. |
 | **Infrastructure path** | **Path A** — Voyage API + Weaviate Cloud (see "The real decision" section) |
 
 ---
@@ -295,4 +296,4 @@ Voyage leads on NDCG and surfaces the fewest irrelevant chunks in top-10 — 5×
 4. ~~**Build golden query set:**~~ ✅ Done — `data/golden_queries.json` (20 queries, 7 categories).
 5. ~~**Run embedding eval:**~~ ✅ Done (2026-04-10) — `reports/embedding_eval_report.json`; model locked to **Voyage-4-Large**; `long-covid-rag-scope-v3.md` Section 5.3 + this doc updated.
 6. **Phase 2 — Full corpus ingest:** Provision Weaviate Cloud, embed ~184k chunks via Voyage API, build `src/index_weaviate.py`, ingest with full metadata payload.
-7. ~~**Cleanup (Phase 1e):**~~ ✅ Done — `ingest_eval_labels_from_report.py` was never created (Option B eval made it unnecessary from the start); `suggest_eval_chunks.py` never had a manual relevance column (already Option B). No files to delete.
+6. ~~**Phase 2 — Full corpus ingest:**~~ ✅ Done (2026-04-10) — Weaviate Cloud provisioned (RQ 8-bit), `src/index_weaviate.py` built (BYOV), 184,255 objects indexed (0 failed). `reports/index_report.json` written.
