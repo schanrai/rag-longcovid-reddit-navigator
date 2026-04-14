@@ -54,6 +54,33 @@ def _load_model(model_name: str) -> object:
     return _model_cache[model_name]
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _compose_rerank_text(r: SearchResult) -> str:
+    """
+    Build the document-side text passed to the cross-encoder.
+
+    Mirrors the composition used during corpus ingestion (embed_eval.compose_embedding_input):
+    for comment chunks (chunk_id starts with t1_), prepend the post title and post summary
+    so the cross-encoder has the same context as the stored vector. Without this, standalone
+    comment fragments are scored in isolation and decontextualised authority markers
+    (e.g. "Stanford researcher") get incorrectly promoted.
+
+    Post chunks use title + body only (no summary — they are their own context).
+    """
+    m = r.metadata
+    title = (m.post_title or "").strip()
+    summary = (m.post_summary or "").strip()
+    body = r.text.strip()
+
+    if r.chunk_id.startswith("t1_") and summary:
+        parts = [title, summary, body]
+    else:
+        parts = [title, body]
+
+    return "\n\n".join(p for p in parts if p)
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def rerank(
@@ -103,7 +130,7 @@ def rerank(
     model_name = DEFAULT_MODEL
     model = _load_model(model_name)
 
-    pairs = [(query, r.text) for r in candidates]
+    pairs = [(query, _compose_rerank_text(r)) for r in candidates]
 
     log.debug(
         "Reranking %d candidates (of %d) with %s (budget=%.0fms)",
@@ -158,7 +185,7 @@ def _print_comparison(
         movement = old_rank - new_rank
         move_str = f"↑{movement}" if movement > 0 else (f"↓{abs(movement)}" if movement < 0 else "—")
         rerank_score_str = f"{r.rerank_score:.4f}" if r.rerank_score is not None else "n/a"
-        rows.append((new_rank, r.hybrid_score, rerank_score_str, move_str, r.chunk_id, r.text))
+        rows.append((new_rank, r.hybrid_score, rerank_score_str, move_str, r.chunk_id, _compose_rerank_text(r)))
 
     if verbose:
         for new_rank, hybrid, rerank_str, move_str, chunk_id, text in rows:

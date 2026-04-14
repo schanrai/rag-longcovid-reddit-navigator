@@ -206,6 +206,55 @@ def weaviate_hybrid_search(
     return results
 
 
+# ── Deduplication ─────────────────────────────────────────────────────────────
+
+def dedup_results(
+    results: list[SearchResult],
+    *,
+    top_k: int,
+) -> list[SearchResult]:
+    """
+    Remove exact-text duplicate chunks, keeping the first (highest-scoring) copy.
+
+    The corpus contains ~945 duplicate chunks (561 groups) — mostly the same user
+    posting identical comments across multiple threads. Without dedup, a single
+    duplicate can consume two or more retrieval slots, reducing result diversity.
+
+    Deduplication is done by exact text hash. Near-duplicate detection (e.g. fuzzy
+    matching) is out of scope for this phase.
+
+    Parameters
+    ----------
+    results:
+        Candidates from weaviate_hybrid_search(), sorted by hybrid_score descending.
+    top_k:
+        Maximum unique results to return. Truncates after dedup.
+
+    Returns
+    -------
+    list[SearchResult] with duplicates removed, truncated to top_k.
+    """
+    import hashlib
+
+    seen: set[str] = set()
+    deduped: list[SearchResult] = []
+
+    for r in results:
+        text_hash = hashlib.md5(r.text.strip().encode()).hexdigest()
+        if text_hash in seen:
+            continue
+        seen.add(text_hash)
+        deduped.append(r)
+        if len(deduped) >= top_k:
+            break
+
+    removed = len(results) - len(deduped)
+    if removed:
+        log.info("Dedup removed %d duplicate chunk(s) — %d unique results", removed, len(deduped))
+
+    return deduped
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def search(
@@ -247,9 +296,10 @@ def search(
     try:
         t0 = time.perf_counter()
         query_vector = embed_query(query_text, cfg=cfg.search, api_key=api_key)
-        results = weaviate_hybrid_search(
+        raw_results = weaviate_hybrid_search(
             query_text, query_vector, cfg=cfg.search, client=client
         )
+        results = dedup_results(raw_results, top_k=cfg.search.top_k_deduped)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         log.info("search() completed in %.0fms — %d results", elapsed_ms, len(results))
         return results

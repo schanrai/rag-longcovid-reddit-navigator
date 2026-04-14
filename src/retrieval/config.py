@@ -41,8 +41,10 @@ class RewriterConfig(BaseModel):
 class SearchConfig(BaseModel):
     alpha: float = Field(default=0.8, ge=0.0, le=1.0,
                          description="BM25/vector ratio: 0=pure BM25, 1=pure vector")
-    top_k_initial: int = Field(default=50, ge=1,
-                               description="Candidates retrieved from Weaviate before reranking")
+    top_k_initial: int = Field(default=75, ge=1,
+                               description="Candidates fetched from Weaviate — over-fetch to absorb dedup losses")
+    top_k_deduped: int = Field(default=50, ge=1,
+                               description="Target unique results after exact-text deduplication")
     voyage_embed_url: str = "https://api.voyageai.com/v1/embeddings"
     voyage_model: str = "voyage-4-large"
     voyage_timeout_s: float = 30.0

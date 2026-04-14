@@ -11,7 +11,7 @@ Modules:
     pipeline.py       — Wires all modules into a single retrieve() call (Phase 3e)
 """
 from .config import RetrievalConfig
-from .hybrid_search import search
+from .hybrid_search import dedup_results, search
 from .reranker import rerank
 from .models import (
     ChunkMetadata,
@@ -26,6 +26,7 @@ from .models import (
 __all__ = [
     "RetrievalConfig",
     "search",
+    "dedup_results",
     "rerank",
     "ChunkMetadata",
     "IntentCategory",
