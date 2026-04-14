@@ -39,7 +39,7 @@ class RewriterConfig(BaseModel):
 # ── Hybrid search config ───────────────────────────────────────────────────────
 
 class SearchConfig(BaseModel):
-    alpha: float = Field(default=0.7, ge=0.0, le=1.0,
+    alpha: float = Field(default=0.8, ge=0.0, le=1.0,
                          description="BM25/vector ratio: 0=pure BM25, 1=pure vector")
     top_k_initial: int = Field(default=50, ge=1,
                                description="Candidates retrieved from Weaviate before reranking")

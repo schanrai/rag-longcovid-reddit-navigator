@@ -11,7 +11,9 @@ Modules:
     pipeline.py       — Wires all modules into a single retrieve() call (Phase 3e)
 """
 from .config import RetrievalConfig
+from .hybrid_search import search
 from .models import (
+    ChunkMetadata,
     IntentCategory,
     RankingPreset,
     RetrievalResult,
@@ -22,6 +24,8 @@ from .models import (
 
 __all__ = [
     "RetrievalConfig",
+    "search",
+    "ChunkMetadata",
     "IntentCategory",
     "RankingPreset",
     "RetrievalResult",

@@ -55,6 +55,7 @@ Your job is to:
 Rules for rewriting:
 - Expand medical abbreviations and informal shorthand to their full form, then stop — do not paraphrase or substitute further. Common examples: LC → Long COVID, BF → brain fog, PEM → post-exertional malaise, POTS → postural orthostatic tachycardia syndrome, MCAS → mast cell activation syndrome, LDN → low-dose naltrexone. Expand any other abbreviations you recognise from the Long COVID or chronic illness community — this list is not exhaustive. For example: "LDN" becomes "low-dose naltrexone", not "naltrexone therapy" or "opioid antagonist treatment".
 - Remove social scaffolding that adds no retrieval value: Reddit-style openers ("Hi everyone", "long time lurker"), hedging preambles ("sorry if this has been asked"), and sign-offs ("thanks in advance"). Do NOT remove question framing ("why am I", "I want to know", "can anyone tell me") — these carry intent and should be preserved or rephrased into the query.
+- IMPORTANT: Community experience phrases like "anyone?", "has anyone tried", "has anyone else experienced this?" are NOT scaffolding. They signal the user wants peer accounts and personal experiences. You MUST preserve them in the rewritten query — rephrase if needed but do not drop them. Example: "beta blockers — anyone?" should keep the community-seeking element, e.g. "beta blockers for tachycardia — community experiences".
 - Preserve emotional tone signals — do not strip distress or urgency
 - If the query is ambiguous, produce 2–3 distinct interpretations instead of one
 
@@ -233,7 +234,7 @@ TEST_QUERIES: Final[list[dict[str, str]]] = [
     },
     {
         "query": "Hi everyone, sorry if this has been asked before but I've been really struggling with fatigue and PEM for months, any advice? Thanks in advance",
-        "hint": "symptom — social scaffolding (opener + apology + sign-off) should be stripped; PEM expanded; question preserved",
+        "hint": "treatment — social scaffolding (opener + apology + sign-off) should be stripped; PEM expanded; 'any advice?' is treatment-seeking, not generic filler",
     },
 
     # ── From golden queries — informal register + real ambiguity ──────────────
@@ -272,10 +273,17 @@ TEST_QUERIES: Final[list[dict[str, str]]] = [
 ]
 
 
-def run_tests(cfg: RetrievalConfig) -> None:
+COMPARE_MODELS: Final[list[str]] = [
+    "google/gemini-2.5-flash-lite",   # default — fast, cheap
+    "google/gemini-2.5-flash",        # step up — same family, more capable
+    "openai/gpt-4o-mini",             # cross-architecture validation
+]
+
+
+def run_tests(cfg: RetrievalConfig) -> tuple[int, int]:
     """Run the built-in QA test suite and print results."""
     print("\n" + "=" * 70)
-    print("query_rewriter.py — QA test suite")
+    print(f"query_rewriter.py — QA test suite  [{cfg.rewriter.model}]")
     print("=" * 70)
 
     passed = 0
@@ -301,6 +309,74 @@ def run_tests(cfg: RetrievalConfig) -> None:
     print("\n" + "=" * 70)
     print(f"Results: {passed} passed, {failed} failed / {len(TEST_QUERIES)} total")
     print("=" * 70)
+    return passed, failed
+
+
+def run_compare(models: list[str]) -> None:
+    """
+    Run all test queries across multiple models and print a side-by-side comparison.
+
+    For each query, shows intent + mode + best rewrite for every model so differences
+    are immediately visible. Errors are flagged inline rather than stopping the run.
+
+    Focus areas for review:
+      - Intent accuracy on ambiguous queries (q01, q09, q18)
+      - Clarification trigger on "LC" alone and q18
+      - Abbreviation expansion without over-paraphrasing (q15, q19)
+      - Tone preservation on emotional queries (q09, q17)
+      - Social scaffolding stripping (long opener query)
+    """
+    col_w = 38  # width per model column
+
+    header = "  ".join(m.split("/")[-1][:col_w].ljust(col_w) for m in models)
+    print("\n" + "=" * (col_w * len(models) + 2 * (len(models) - 1)))
+    print(f"query_rewriter.py — model comparison  ({len(models)} models, {len(TEST_QUERIES)} queries)")
+    print("=" * (col_w * len(models) + 2 * (len(models) - 1)))
+    print(header)
+
+    totals: dict[str, dict[str, int]] = {m: {"passed": 0, "failed": 0} for m in models}
+
+    for i, case in enumerate(TEST_QUERIES, start=1):
+        q = case["query"]
+        hint = case["hint"]
+        print(f"\n[{i:02d}] {q!r}")
+        print(f"      Hint: {hint}")
+        print("      " + "-" * (col_w * len(models) + 2 * (len(models) - 1)))
+
+        results: list[str] = []
+        for model in models:
+            cfg = RetrievalConfig()
+            cfg.rewriter.model = model
+            try:
+                r = rewrite(q, cfg=cfg)
+                best = r.best_rewrite
+                cell = (
+                    f"mode={r.mode.value}  intent={r.intent.value}\n"
+                    f"      rewrite: {best.query[:col_w - 16]!r}\n"
+                    f"      conf={best.confidence:.2f}"
+                )
+                totals[model]["passed"] += 1
+            except Exception as exc:
+                cell = f"ERROR: {str(exc)[:col_w - 8]}"
+                totals[model]["failed"] += 1
+            results.append(cell)
+
+        # Print row — one line per cell line, columns aligned
+        cell_lines = [c.split("\n") for c in results]
+        max_lines = max(len(cl) for cl in cell_lines)
+        for line_i in range(max_lines):
+            row_parts = []
+            for cl in cell_lines:
+                part = cl[line_i] if line_i < len(cl) else ""
+                row_parts.append(part.ljust(col_w))
+            print("      " + "  ".join(row_parts))
+
+    print("\n" + "=" * (col_w * len(models) + 2 * (len(models) - 1)))
+    print("Summary:")
+    for model in models:
+        t = totals[model]
+        print(f"  {model.split('/')[-1]:<35} passed={t['passed']}  failed={t['failed']}")
+    print("=" * (col_w * len(models) + 2 * (len(models) - 1)))
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -317,9 +393,13 @@ def main() -> None:
     ap.add_argument("--query", "-q", type=str, default=None,
                     help="Single query to rewrite (prints result as JSON)")
     ap.add_argument("--test", action="store_true",
-                    help="Run built-in QA test suite across 10 test queries")
+                    help="Run built-in QA test suite with the default (or --model) model")
+    ap.add_argument("--compare", action="store_true",
+                    help=f"Run all test queries across {len(COMPARE_MODELS)} models side-by-side")
+    ap.add_argument("--models", type=str, default=None,
+                    help="Comma-separated model IDs for --compare (overrides default set)")
     ap.add_argument("--model", type=str, default=None,
-                    help="Override OpenRouter model (e.g. openai/gpt-4o-mini)")
+                    help="Override OpenRouter model for --test or --query")
     ap.add_argument("--verbose", "-v", action="store_true",
                     help="Enable DEBUG logging")
     args = ap.parse_args()
@@ -331,7 +411,14 @@ def main() -> None:
     if args.model:
         cfg.rewriter.model = args.model
 
-    if args.test:
+    if args.compare:
+        models = (
+            [m.strip() for m in args.models.split(",")]
+            if args.models
+            else COMPARE_MODELS
+        )
+        run_compare(models)
+    elif args.test:
         run_tests(cfg)
     elif args.query:
         result = rewrite(args.query, cfg=cfg)
