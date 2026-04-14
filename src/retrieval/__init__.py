@@ -12,6 +12,7 @@ Modules:
 """
 from .config import RetrievalConfig
 from .hybrid_search import search
+from .reranker import rerank
 from .models import (
     ChunkMetadata,
     IntentCategory,
@@ -25,6 +26,7 @@ from .models import (
 __all__ = [
     "RetrievalConfig",
     "search",
+    "rerank",
     "ChunkMetadata",
     "IntentCategory",
     "RankingPreset",

@@ -261,11 +261,14 @@ def search(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 TEST_QUERIES: Final[list[str]] = [
+    # From hybrid_search_qa.md Test 1 — timeline fatigue query, surface-level semantic match
     "Long COVID persistent fatigue 8 months after infection",
-    "post-exertional malaise — community experiences",
-    "beta blockers for tachycardia Long COVID",
-    "disability benefits for Long COVID",
-    "cognitive impairment brain fog since infection",
+    # From hybrid_search_qa.md Test 4 — fuzzy semantic, no medical keywords (critical test for vector leg)
+    "I feel like my brain stopped working",
+    # From query_rewrite_singlellm_qa.md q09 — community signal + informal phrasing; revealed stripping issue in 3a
+    "beta blockers for the constant tachycardia thing — anyone? ivabradine?",
+    # From query_rewrite_singlellm_qa.md q12 — emotional framing + dual intent; revealed misclassification in 3a
+    "LC awareness. Doctor and family don't believe me =(",
 ]
 
 
