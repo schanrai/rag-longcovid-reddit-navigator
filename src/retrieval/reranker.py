@@ -17,7 +17,7 @@ Design decisions:
 
 CLI usage:
     python -m src.retrieval.reranker --query "fatigue long covid" --test
-    python -m src.retrieval.reranker --query "..." --top-k 20 --verbose
+    python -m src.retrieval.reranker --query "..." --top-k 25 --verbose
 """
 from __future__ import annotations
 
@@ -227,7 +227,7 @@ def run_test(cfg: RetrievalConfig) -> None:
         print(f"  Reranking: {len(reranked)} results in {rerank_ms:.0f}ms")
 
         # Compare against the full candidate window so movement reflects true hybrid rank
-        _print_comparison(query, hybrid_results[:cfg.reranker.top_k_candidates], reranked[:10], verbose=True)
+        _print_comparison(query, hybrid_results[:cfg.reranker.top_k_candidates], reranked, verbose=True)
 
     print("\n" + "=" * 70)
 
@@ -241,7 +241,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Phase 3c cross-encoder reranker")
     parser.add_argument("--query", type=str, help="Run a single query")
-    parser.add_argument("--top-k", type=int, default=20, help="Top-k reranked results (default 20)")
+    parser.add_argument("--top-k", type=int, default=25, help="Top-k reranked results (default 25)")
     parser.add_argument("--test", action="store_true", help="Run built-in QA test suite")
     parser.add_argument("--verbose", action="store_true", help="Print text previews")
     parser.add_argument(
