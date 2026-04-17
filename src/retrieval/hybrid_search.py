@@ -189,6 +189,7 @@ def weaviate_hybrid_search(
         vector=query_vector,
         alpha=cfg.alpha,
         limit=cfg.top_k_initial,
+        query_properties=["text", "post_title"],
         return_properties=RETURN_PROPERTIES,
         return_metadata=MetadataQuery(score=True),
         fusion_type=HybridFusion.RELATIVE_SCORE,
