@@ -54,8 +54,8 @@ class SearchConfig(BaseModel):
 
 class RerankerConfig(BaseModel):
     enabled: bool = False             # off by default; enable once core search is validated
-    top_k_candidates: int = 25        # how many hybrid results to pass to the cross-encoder
-    top_k_reranked: int = 25          # how many reranked results to return (widened from 20 — LLM synthesizer benefits from broader candidate set)
+    top_k_candidates: int = 50        # how many hybrid results to pass to the cross-encoder (matches top_k_deduped — ranking owns truncation)
+    top_k_reranked: int = 50          # pass all deduped candidates to ranking layer; ranking owns truncation and diversity
     latency_budget_ms: float = 2000.0 # return original order if reranking exceeds this
 
 

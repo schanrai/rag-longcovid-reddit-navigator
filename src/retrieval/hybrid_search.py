@@ -310,7 +310,8 @@ def search(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-TEST_QUERIES: Final[list[str]] = [
+TEST_QUERIES_CORPUS: Final[list[str]] = [
+    # ── Corpus-derived queries (from earlier QA phases, retained for cross-phase comparability) ──
     # From hybrid_search_qa.md Test 1 — timeline fatigue query, surface-level semantic match
     "Long COVID persistent fatigue 8 months after infection",
     # From hybrid_search_qa.md Test 4 — fuzzy semantic, no medical keywords (critical test for vector leg)
@@ -319,6 +320,19 @@ TEST_QUERIES: Final[list[str]] = [
     "beta blockers for the constant tachycardia thing — anyone? ivabradine?",
     # From query_rewrite_singlellm_qa.md q12 — emotional framing + dual intent; revealed misclassification in 3a
     "LC awareness. Doctor and family don't believe me =(",
+]
+
+TEST_QUERIES_SYNTHETIC: Final[list[str]] = [
+    # ── Synthetic user-style queries (diversity test — should not cluster on a single thread) ──
+    "why am i still so exhausted 8 months after getting Covid? Is this normal??",
+    "Everything feels foggy and I can't think straight anymore",
+    "Anyone taking beta blockers for tachycardia-like symptoms? has it helped? what about ivabradine?",
+    "How do I get my doctor to take my symptoms seriously?",
+]
+
+TEST_QUERIES: Final[list[str]] = [
+    TEST_QUERIES_SYNTHETIC[0],  # Q5 — exhaustion / 8 months
+    TEST_QUERIES_SYNTHETIC[3],  # Q8 — doctor credibility
 ]
 
 

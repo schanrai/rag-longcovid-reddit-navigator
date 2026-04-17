@@ -60,23 +60,19 @@ def _compose_rerank_text(r: SearchResult) -> str:
     """
     Build the document-side text passed to the cross-encoder.
 
-    Mirrors the composition used during corpus ingestion (embed_eval.compose_embedding_input):
-    for comment chunks (chunk_id starts with t1_), prepend the post title and post summary
-    so the cross-encoder has the same context as the stored vector. Without this, standalone
-    comment fragments are scored in isolation and decontextualised authority markers
-    (e.g. "Stanford researcher") get incorrectly promoted.
+    Uses post_title + chunk body only. post_summary is intentionally excluded:
+    A/B testing (Finding 10, reranker_qa.md) showed that including post_summary
+    inflated low-substance comments from dominant threads and suppressed diversity.
+    Removing it improved top-10 thread diversity from 3→5 (Q7) and 4→9 (Q5).
 
-    Post chunks use title + body only (no summary — they are their own context).
+    The embedding index still uses title + summary + body (compose_embedding_input
+    in embed_eval.py) — this change is reranker-only.
     """
     m = r.metadata
     title = (m.post_title or "").strip()
-    summary = (m.post_summary or "").strip()
     body = r.text.strip()
 
-    if r.chunk_id.startswith("t1_") and summary:
-        parts = [title, summary, body]
-    else:
-        parts = [title, body]
+    parts = [title, body]
 
     return "\n\n".join(p for p in parts if p)
 
@@ -241,7 +237,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Phase 3c cross-encoder reranker")
     parser.add_argument("--query", type=str, help="Run a single query")
-    parser.add_argument("--top-k", type=int, default=25, help="Top-k reranked results (default 25)")
+    parser.add_argument("--top-k", type=int, default=None, help="Top-k reranked results (default from config)")
     parser.add_argument("--test", action="store_true", help="Run built-in QA test suite")
     parser.add_argument("--verbose", action="store_true", help="Print text previews")
     parser.add_argument(
@@ -251,7 +247,8 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = RetrievalConfig()
-    cfg.reranker.top_k_reranked = args.top_k
+    if args.top_k is not None:
+        cfg.reranker.top_k_reranked = args.top_k
     cfg.reranker.enabled = not args.disable_reranker
 
     if args.test:
@@ -261,16 +258,29 @@ def main() -> None:
         if not voyage_key:
             raise EnvironmentError("VOYAGE_API_KEY not set")
 
-        print(f"\nQuery: {args.query!r}")
-        hybrid_results = hybrid_search(args.query, cfg=cfg, voyage_api_key=voyage_key)
-        print(f"Hybrid search: {len(hybrid_results)} results")
+        print("\n" + "=" * 70)
+        print(f"reranker.py — single query  [model={DEFAULT_MODEL}]")
+        print(f"  reranker_enabled={cfg.reranker.enabled}  top_k_reranked={cfg.reranker.top_k_reranked}")
+        print("=" * 70)
 
+        print(f"\n[SEARCH] {args.query!r}")
         t0 = time.perf_counter()
-        reranked = rerank(args.query, hybrid_results, cfg=cfg)
-        elapsed = (time.perf_counter() - t0) * 1000
-        print(f"Reranked to top {len(reranked)} in {elapsed:.0f}ms\n")
+        hybrid_results = hybrid_search(args.query, cfg=cfg, voyage_api_key=voyage_key)
+        search_ms = (time.perf_counter() - t0) * 1000
+        print(f"  Hybrid search: {len(hybrid_results)} results in {search_ms:.0f}ms")
 
-        _print_comparison(args.query, hybrid_results[:len(reranked)], reranked, verbose=args.verbose)
+        t1 = time.perf_counter()
+        reranked = rerank(args.query, hybrid_results, cfg=cfg)
+        rerank_ms = (time.perf_counter() - t1) * 1000
+        print(f"  Reranking: {len(reranked)} results in {rerank_ms:.0f}ms")
+
+        _print_comparison(
+            args.query,
+            hybrid_results[:cfg.reranker.top_k_candidates],
+            reranked,
+            verbose=True,
+        )
+        print("\n" + "=" * 70)
     else:
         parser.print_help()
 
