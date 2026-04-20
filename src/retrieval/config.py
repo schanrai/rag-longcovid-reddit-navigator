@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .models import FreshnessStance, IntentCategory, RankingPreset
+from .models import FreshnessStance, IntentCategory
 
 
 # ── Intent → freshness stance mapping ─────────────────────────────────────────
@@ -56,30 +56,45 @@ class RerankerConfig(BaseModel):
     enabled: bool = False             # off by default; enable once core search is validated
     top_k_candidates: int = 50        # how many hybrid results to pass to the cross-encoder (matches top_k_deduped — ranking owns truncation)
     top_k_reranked: int = 50          # pass all deduped candidates to ranking layer; ranking owns truncation and diversity
-    latency_budget_ms: float = 2000.0 # return original order if reranking exceeds this
+    latency_budget_ms: float = 5000.0 # return original order if reranking exceeds this; 5s accommodates MPS cold-start (~2–3s) before warm inference (<500ms)
 
 
 # ── Ranking config ─────────────────────────────────────────────────────────────
 
 class RankingConfig(BaseModel):
-    default_preset: RankingPreset = RankingPreset.MOST_RELEVANT
+    """
+    Phase 3d ranking layer — signal weights and normalisation parameters.
 
-    # Popularity signal weights (applied before freshness adjustment)
-    weight_comment_score: float = 1.0
-    weight_post_score: float = 1.0
-    weight_agreement_count: float = 1.5  # stronger signal — explicit community validation
-    weight_thanks_count: float = 1.2
-    weight_num_comments: float = 0.8
+    Weights are applied to normalised (0–1) signal values. The blended score
+    is a weighted sum; weights do not need to sum to 1.0. Production defaults
+    match Config B (rank-dominant with tiebreakers).
 
-    # Freshness decay strengths per stance (implementation detail — tune during build)
-    # These are relative multipliers; exact formula determined during 3d build.
-    decay_high: float = 0.3    # strong time penalty on older posts
-    decay_medium: float = 0.1  # moderate
-    decay_low: float = 0.01    # near-zero — age barely matters
+    Tournament configs (A/B/C/D) are defined in ranking.py for QA comparison.
+    """
+    w_rank_position: float = Field(default=1.0, ge=0.0,
+        description="Reranker rank position — primary relevance signal")
+    w_comment_score: float = Field(default=0.2, ge=0.0,
+        description="Reddit upvotes on the chunk (comment_score or post_score)")
+    w_num_comments: float = Field(default=0.1, ge=0.0,
+        description="Parent post discussion volume")
+    w_recency: float = Field(default=0.0, ge=0.0,
+        description="Content recency (0 by default; enable for treatment queries)")
+    w_agreement: float = Field(default=0.02, ge=0.0,
+        description="Agreement presence flag — tiebreaker")
+    w_thanks: float = Field(default=0.02, ge=0.0,
+        description="Thanks presence flag — tiebreaker")
 
-    # Preset overrides
-    latest_first_decay_override: float = 0.5   # heavy recency dominance
-    most_discussed_num_comments_weight: float = 3.0  # num_comments is primary
+    diversity_cap: int = Field(default=3, ge=1,
+        description="Max chunks per parent thread (link_id)")
+    top_k_final: int = Field(default=25, ge=1,
+        description="Final result count after ranking + truncation")
+
+    comment_score_log_cap: float = Field(default=1500.0, gt=0,
+        description="comment_score ceiling for log normalisation (corpus range: -100 to ~1500)")
+    num_comments_log_cap: float = Field(default=2000.0, gt=0,
+        description="num_comments ceiling for log normalisation")
+    recency_half_life_days: float = Field(default=730.0, gt=0,
+        description="Exponential decay half-life in days (default: 2 years)")
 
 
 # ── Master config ──────────────────────────────────────────────────────────────
