@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "description": "Golden queries for embedding eval and RAG eval. Review and edit queries first; then add labeled_relevant chunk IDs per query (Phase 1b). See docs/golden-queries.md.",
+  "queries": [
+    {
+      "id": "q01",
+      "query": "I feel like I've gotten dumber since my infection",
+      "category": "symptom",
+      "expected_terms": ["brain fog", "cognitive", "memory", "focus", "dumb", "thinking"],
+      "notes": "Informal cognitive complaints; should match threads about brain fog, word-finding, concentration—not generic IQ discourse.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q02",
+      "query": "Anyone else get POTS or dysautonomia after COVID? What worked for you?",
+      "category": "symptom",
+      "expected_terms": ["POTS", "dysautonomia", "tachycardia", "standing", "tilt"],
+      "notes": "Strong hits mention orthostatic symptoms, diagnosis journey, or management (fluids, compression, meds).",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q03",
+      "query": "How do you manage PEM or crashing after activity?",
+      "category": "symptom",
+      "expected_terms": ["PEM", "crash", "pacing", "exertion", "relapse"],
+      "notes": "Overlap with ME/CFS-style pacing is OK if grounded in patient experience.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q04",
+      "query": "Has low dose naltrexone (LDN) helped anyone with Long COVID symptoms?",
+      "category": "treatment",
+      "expected_terms": ["LDN", "naltrexone", "dose", "mg"],
+      "notes": "Relevant chunks discuss personal protocols, side effects, or prescriber experience—not vague 'ask your doctor' only.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q05",
+      "query": "What about MCAS or histamine issues—diet, H1, H2, anything that helped?",
+      "category": "treatment",
+      "expected_terms": ["MCAS", "histamine", "H1", "H2", "mast cell"],
+      "notes": "Should match discussion of triggers, meds, or low-histamine approaches from the community.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q06",
+      "query": "People do recover, five years in and still making progress....my 2 cents",
+      "category": "timeline",
+      "expected_terms": ["recover", "years", "progress", "better", "improvement", "long haul"],
+      "notes": "Recovery arc and hope posts; also matches replies that debate timelines and realistic improvement.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q07",
+      "query": "Did anyone's symptoms get better after a year or more?",
+      "category": "timeline",
+      "expected_terms": ["year", "recovery", "better", "improvement", "months"],
+      "notes": "Retrieve hope grounded in experience; avoid empty platitudes.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q08",
+      "query": "How common is it to have heart palpitations or chest tightness months later?",
+      "category": "prevalence",
+      "expected_terms": ["palpitations", "chest", "heart", "tachycardia"],
+      "notes": "Agreement-style or narrative posts describing similar cardiovascular symptoms are on-topic.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q09",
+      "query": "I miss the old me",
+      "category": "emotional",
+      "expected_terms": ["grief", "identity", "loss", "who I was", "depression", "miss"],
+      "notes": "Short identity/grief posts; should surface emotional validation and similar experiences.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q10",
+      "query": "Disability just got denied again and the final answer is NO",
+      "category": "benefits",
+      "expected_terms": ["disability", "denied", "SSDI", "work", "appeal", "benefits"],
+      "notes": "Disability benefits / SSDI / appeals / paperwork threads—not primarily emotional support.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q11",
+      "query": "Sleep is broken—insomnia, unrefreshing sleep, waking wired. What has helped?",
+      "category": "symptom",
+      "expected_terms": ["sleep", "insomnia", "fatigue", "rest"],
+      "notes": "Symptom and intervention discussions; avoid generic sleep hygiene only if unrelated to LC.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q12",
+      "query": "Shortness of breath or air hunger with normal tests—anyone relate?",
+      "category": "symptom",
+      "expected_terms": ["breath", "SOB", "air hunger", "oxygen", "lungs"],
+      "notes": "Posts about dyspnea with clear workup or similar stories.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q13",
+      "query": "Sleeping 10-12 hours a night helps so much with symptoms. Anyone else feel this way?",
+      "category": "treatment",
+      "expected_terms": ["sleep", "hours", "fatigue", "rest", "symptoms", "recovery"],
+      "notes": "Sleep duration as self-management; should match agreement-style or similar-experience threads.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q14",
+      "query": "Neuropathy, tingling, or burning in hands and feet after COVID—did it improve?",
+      "category": "symptom",
+      "expected_terms": ["neuropathy", "tingling", "nerve", "burning", "hands"],
+      "notes": "Peripheral nerve symptom narratives or treatments tried.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q15",
+      "query": "beta blockers for the constant tachycardia thing — anyone? ivabradine?",
+      "category": "treatment",
+      "expected_terms": ["beta blocker", "ivabradine", "propranolol", "bisoprolol", "heart rate", "HR"],
+      "notes": "First-person med chatter; same retrieval target as before, looser wording.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q16",
+      "query": "What does a typical bad crash day look like for you?",
+      "category": "prevalence",
+      "expected_terms": ["crash", "flare", "relapse", "symptoms", "day"],
+      "notes": "Descriptive experience posts; good for semantic match to informal language.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q17",
+      "query": "Doctors suck! I have no respect for them nowadays",
+      "category": "emotional",
+      "expected_terms": ["doctor", "dismissed", "gaslight", "specialist", "clinic", "don't believe"],
+      "notes": "Angry care-system vent; pair with threads about being dismissed vs useful provider finds.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q18",
+      "query": "how do you even know if its PEM vs youre just out of shape",
+      "category": "meta",
+      "expected_terms": ["PEM", "deconditioned", "exercise", "pacing", "crash", "out of shape"],
+      "notes": "Same conceptual target as clinical PEM wording; tests synonymy with informal phrasing.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q19",
+      "query": "LC awareness. Doctor and family don't believe me =(",
+      "category": "emotional",
+      "expected_terms": ["LC", "Long Covid", "family", "doctor", "don't believe", "dismissed", "awareness"],
+      "notes": "Abbreviated LC + dual disbelief (clinical + family); tests retrieval without spelling out Long COVID.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q20",
+      "query": "My Long Covid is reversed - here are all the treatments I tried",
+      "category": "treatment",
+      "expected_terms": ["reversed", "recovery", "treatment", "tried", "better", "protocol"],
+      "notes": "Recovery-oriented list posts; should hit threads summarizing what helped over time.",
+      "labeled_relevant": []
+    }
+  ]
+}

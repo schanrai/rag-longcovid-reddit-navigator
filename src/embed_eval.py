@@ -10,6 +10,8 @@ Self-hosted models via sentence-transformers (CPU). Voyage via httpx REST API.
 Usage:
   python3 src/embed_eval.py
   python3 src/embed_eval.py --models qwen3_embedding_0.6b voyage_4_large
+  python3 src/embed_eval.py --models voyage_4_large --no-enrichment
+  # Writes to data/embeddings/<model_id>_no_enrich/ (no post_title/post_summary in vector for t1_ chunks; t3_ unchanged: title+body)
   python3 src/embed_eval.py --skip-voyage   # local models only
   python3 src/embed_eval.py --st-batch-size 8   # lower RAM (Rosetta / long chunks)
 
@@ -80,11 +82,25 @@ DEFAULT_MODELS: list[EmbeddingModelSpec] = [
 ]
 
 
-def compose_embedding_input(rec: dict[str, Any]) -> str:
-    """Match scope: comment vs post composition."""
+def compose_embedding_input(
+    rec: dict[str, Any], *, no_enrichment: bool = False
+) -> str:
+    """Match scope: comment vs post composition.
+
+    When *no_enrichment* is True (enrichment A/B, eval corpus only): for **comment**
+    chunks (``t1_``) embed **body text only** — no post title or LLM post_summary in
+    the string sent to the embedder. Post chunks (``t3_``) keep title+body (posts have
+    no post_summary in this pipeline). See build plan Phase 3e Step 4.
+    """
     title = (rec.get("post_title") or "").strip()
     body = (rec.get("text") or "").strip()
     cid = str(rec.get("chunk_id") or "")
+
+    if no_enrichment:
+        if cid.startswith("t1_"):
+            return body
+        return "\n\n".join(p for p in (title, body) if p)
+
     parts: list[str]
     if cid.startswith("t1_"):
         summary = rec.get("post_summary")
@@ -233,8 +249,11 @@ def run_one_model(
     st_batch_size: int,
     st_device: str,
     voyage_batch_size: int,
+    enrichment_mode: Literal["full", "none"] = "full",
+    output_model_dir_name: str | None = None,
 ) -> None:
-    out_dir = paths.embeddings_dir / spec.id
+    dir_name = output_model_dir_name if output_model_dir_name else spec.id
+    out_dir = paths.embeddings_dir / dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if spec.kind == "sentence_transformers":
@@ -273,6 +292,10 @@ def run_one_model(
     index = {
         "schema": SCHEMA_INDEX,
         "model_spec_id": spec.id,
+        "enrichment": enrichment_mode,
+        "compose": "title+summary+body (t1) / title+body (t3)"
+        if enrichment_mode == "full"
+        else "body-only (t1) / title+body (t3)",
         "kind": spec.kind,
         "sentence_transformers_model": spec.sentence_transformers_model,
         "voyage_model": spec.voyage_model,
@@ -302,6 +325,12 @@ def main() -> None:
     ap.add_argument("--st-batch-size", type=int, default=32)
     ap.add_argument("--st-device", type=str, default="cpu")
     ap.add_argument("--voyage-batch-size", type=int, default=VOYAGE_BATCH_MAX)
+    ap.add_argument(
+        "--no-enrichment",
+        action="store_true",
+        help="Eval-corpus A/B: t1_ chunks use body text only in the embed string (no title/summary). "
+        "t3_ unchanged. Writes under data/embeddings/<model_id>_no_enrich/ to avoid clobbering full run.",
+    )
     args = ap.parse_args()
 
     if not args.eval_corpus.exists():
@@ -312,7 +341,9 @@ def main() -> None:
         sys.exit(1)
 
     chunk_ids, records = load_eval_corpus(args.eval_corpus)
-    chunk_texts = [compose_embedding_input(r) for r in records]
+    no_enr = bool(args.no_enrichment)
+    chunk_texts = [compose_embedding_input(r, no_enrichment=no_enr) for r in records]
+    enrichment_mode: Literal["full", "none"] = "none" if no_enr else "full"
 
     queries = load_golden_queries(args.golden)
     query_ids = [str(q["id"]) for q in queries]
@@ -337,7 +368,8 @@ def main() -> None:
     )
 
     for spec in specs:
-        log.info("=== Embedding model: %s ===", spec.id)
+        out_name = f"{spec.id}_no_enrich" if no_enr else None
+        log.info("=== Embedding model: %s (%s) ===", spec.id, enrichment_mode)
         try:
             run_one_model(
                 spec,
@@ -349,6 +381,8 @@ def main() -> None:
                 st_batch_size=args.st_batch_size,
                 st_device=args.st_device,
                 voyage_batch_size=args.voyage_batch_size,
+                enrichment_mode=enrichment_mode,
+                output_model_dir_name=out_name,
             )
         except Exception as exc:
             log.exception("Failed model %s: %s", spec.id, exc)

@@ -4,10 +4,10 @@
   "queries": [
     {
       "id": "q01",
-      "query": "I feel like I've gotten dumber since my infection",
+      "query": "Everything feels foggy, my memory has gone and I feel stupid",
       "category": "symptom",
       "expected_terms": ["brain fog", "cognitive", "memory", "focus", "dumb", "thinking"],
-      "notes": "Informal cognitive complaints; should match threads about brain fog, word-finding, concentration—not generic IQ discourse.",
+      "notes": "Informal cognitive complaints; should match threads about brain fog, memory loss, concentration—not generic IQ discourse.",
       "labeled_relevant": []
     },
     {
@@ -44,10 +44,10 @@
     },
     {
       "id": "q06",
-      "query": "People do recover, five years in and still making progress....my 2 cents",
+      "query": "Finally recovered after 4 years - here are all the things I tried and what worked for me",
       "category": "timeline",
-      "expected_terms": ["recover", "years", "progress", "better", "improvement", "long haul"],
-      "notes": "Recovery arc and hope posts; also matches replies that debate timelines and realistic improvement.",
+      "expected_terms": ["recovered", "years", "tried", "better", "protocol", "long haul"],
+      "notes": "Multi-year recovery stories and what helped; thread debate on realistic timelines is OK.",
       "labeled_relevant": []
     },
     {
@@ -76,7 +76,7 @@
     },
     {
       "id": "q10",
-      "query": "Disability just got denied again and the final answer is NO",
+      "query": "Disability just got denied again, what do I do now?",
       "category": "benefits",
       "expected_terms": ["disability", "denied", "SSDI", "work", "appeal", "benefits"],
       "notes": "Disability benefits / SSDI / appeals / paperwork threads—not primarily emotional support.",
@@ -84,7 +84,7 @@
     },
     {
       "id": "q11",
-      "query": "Sleep is broken—insomnia, unrefreshing sleep, waking wired. What has helped?",
+      "query": "Sleep is broken—insomnia,waking wired. What has helped?",
       "category": "symptom",
       "expected_terms": ["sleep", "insomnia", "fatigue", "rest"],
       "notes": "Symptom and intervention discussions; avoid generic sleep hygiene only if unrelated to LC.",
@@ -100,7 +100,7 @@
     },
     {
       "id": "q13",
-      "query": "Sleeping 10-12 hours a night helps so much with symptoms. Anyone else feel this way?",
+      "query": "Sleeping 10-12 hours a night is a game-changer for dealing with with symptoms. Anyone else feels this way?",
       "category": "treatment",
       "expected_terms": ["sleep", "hours", "fatigue", "rest", "symptoms", "recovery"],
       "notes": "Sleep duration as self-management; should match agreement-style or similar-experience threads.",
@@ -108,7 +108,7 @@
     },
     {
       "id": "q14",
-      "query": "Neuropathy, tingling, or burning in hands and feet after COVID—did it improve?",
+      "query": "Nerve pain, tingling, or burning in hands and feet after COVID—did it improve?",
       "category": "symptom",
       "expected_terms": ["neuropathy", "tingling", "nerve", "burning", "hands"],
       "notes": "Peripheral nerve symptom narratives or treatments tried.",
@@ -116,7 +116,7 @@
     },
     {
       "id": "q15",
-      "query": "beta blockers for the constant tachycardia thing — anyone? ivabradine?",
+      "query": "Anyone taking beta blockers for tachycardia-like symptoms? What aboutivabradine?",
       "category": "treatment",
       "expected_terms": ["beta blocker", "ivabradine", "propranolol", "bisoprolol", "heart rate", "HR"],
       "notes": "First-person med chatter; same retrieval target as before, looser wording.",
@@ -156,10 +156,10 @@
     },
     {
       "id": "q20",
-      "query": "My Long Covid is reversed - here are all the treatments I tried",
-      "category": "treatment",
-      "expected_terms": ["reversed", "recovery", "treatment", "tried", "better", "protocol"],
-      "notes": "Recovery-oriented list posts; should hit threads summarizing what helped over time.",
+      "query": "why am i still so exhausted 8 months after getting Covid? Is this normal?",
+      "category": "symptom",
+      "expected_terms": ["exhausted", "fatigue", "months", "long haul", "PEM", "tired"],
+      "notes": "Persistent post-acute fatigue; threads on whether months-long exhaustion is common and what others did next.",
       "labeled_relevant": []
     }
   ]
