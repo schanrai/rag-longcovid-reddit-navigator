@@ -82,32 +82,60 @@ DEFAULT_MODELS: list[EmbeddingModelSpec] = [
 ]
 
 
+EnrichmentPolicy = Literal["baseline_full", "no_enrich", "depth_aware_v1"]
+
+
+def _depth_from_record(rec: dict[str, Any]) -> int | None:
+    """Prefer reconstructed depth, then legacy nest_level."""
+    raw = rec.get("nest_level_reconstructed")
+    if raw is None:
+        raw = rec.get("nest_level")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def compose_embedding_input(
-    rec: dict[str, Any], *, no_enrichment: bool = False
+    rec: dict[str, Any], *, enrichment_policy: EnrichmentPolicy = "baseline_full"
 ) -> str:
     """Match scope: comment vs post composition.
 
-    When *no_enrichment* is True (enrichment A/B, eval corpus only): for **comment**
-    chunks (``t1_``) embed **body text only** — no post title or LLM post_summary in
-    the string sent to the embedder. Post chunks (``t3_``) keep title+body (posts have
-    no post_summary in this pipeline). See build plan Phase 3e Step 4.
+    Policies:
+    - baseline_full: comment t1_ uses title+summary+body (or title+body when no summary)
+    - no_enrich: comment t1_ uses body only
+    - depth_aware_v1:
+      - depth 0-1: title+summary+body
+      - depth 2-3: title+body
+      - depth 4+: parent_first_sentence+body (fallback body-only)
+    Post t3_ always uses title+body.
     """
     title = (rec.get("post_title") or "").strip()
     body = (rec.get("text") or "").strip()
     cid = str(rec.get("chunk_id") or "")
-
-    if no_enrichment:
-        if cid.startswith("t1_"):
-            return body
+    if not cid.startswith("t1_"):
         return "\n\n".join(p for p in (title, body) if p)
 
+    if enrichment_policy == "no_enrich":
+        return body
+
+    if enrichment_policy == "depth_aware_v1":
+        depth = _depth_from_record(rec)
+        summary = (rec.get("post_summary") or "").strip()
+        parent_first = (rec.get("parent_first_sentence") or "").strip()
+        if depth is not None and depth >= 4:
+            return "\n\n".join(p for p in (parent_first, body) if p)
+        if depth is not None and depth >= 2:
+            return "\n\n".join(p for p in (title, body) if p)
+        # depth 0-1, unknown, or malformed: conservative baseline behavior
+        return "\n\n".join(p for p in (title, summary, body) if p)
+
     parts: list[str]
-    if cid.startswith("t1_"):
-        summary = rec.get("post_summary")
-        if summary is not None and str(summary).strip():
-            parts = [title, str(summary).strip(), body]
-        else:
-            parts = [title, body]
+    summary = rec.get("post_summary")
+    if summary is not None and str(summary).strip():
+        parts = [title, str(summary).strip(), body]
     else:
         parts = [title, body]
     return "\n\n".join(p for p in parts if p)
@@ -249,7 +277,7 @@ def run_one_model(
     st_batch_size: int,
     st_device: str,
     voyage_batch_size: int,
-    enrichment_mode: Literal["full", "none"] = "full",
+    enrichment_mode: EnrichmentPolicy = "baseline_full",
     output_model_dir_name: str | None = None,
 ) -> None:
     dir_name = output_model_dir_name if output_model_dir_name else spec.id
@@ -293,9 +321,15 @@ def run_one_model(
         "schema": SCHEMA_INDEX,
         "model_spec_id": spec.id,
         "enrichment": enrichment_mode,
-        "compose": "title+summary+body (t1) / title+body (t3)"
-        if enrichment_mode == "full"
-        else "body-only (t1) / title+body (t3)",
+        "compose": (
+            "title+summary+body (t1) / title+body (t3)"
+            if enrichment_mode == "baseline_full"
+            else (
+                "body-only (t1) / title+body (t3)"
+                if enrichment_mode == "no_enrich"
+                else "depth_aware_v1: depth0-1 title+summary+body; depth2-3 title+body; depth4+ parent_first_sentence+body; t3 title+body"
+            )
+        ),
         "kind": spec.kind,
         "sentence_transformers_model": spec.sentence_transformers_model,
         "voyage_model": spec.voyage_model,
@@ -331,6 +365,12 @@ def main() -> None:
         help="Eval-corpus A/B: t1_ chunks use body text only in the embed string (no title/summary). "
         "t3_ unchanged. Writes under data/embeddings/<model_id>_no_enrich/ to avoid clobbering full run.",
     )
+    ap.add_argument(
+        "--enrichment-policy",
+        choices=["baseline_full", "no_enrich", "depth_aware_v1"],
+        default=None,
+        help="Explicit embedding composition policy. Prefer this over --no-enrichment.",
+    )
     args = ap.parse_args()
 
     if not args.eval_corpus.exists():
@@ -341,9 +381,11 @@ def main() -> None:
         sys.exit(1)
 
     chunk_ids, records = load_eval_corpus(args.eval_corpus)
-    no_enr = bool(args.no_enrichment)
-    chunk_texts = [compose_embedding_input(r, no_enrichment=no_enr) for r in records]
-    enrichment_mode: Literal["full", "none"] = "none" if no_enr else "full"
+    if args.enrichment_policy:
+        policy: EnrichmentPolicy = args.enrichment_policy
+    else:
+        policy = "no_enrich" if bool(args.no_enrichment) else "baseline_full"
+    chunk_texts = [compose_embedding_input(r, enrichment_policy=policy) for r in records]
 
     queries = load_golden_queries(args.golden)
     query_ids = [str(q["id"]) for q in queries]
@@ -368,8 +410,13 @@ def main() -> None:
     )
 
     for spec in specs:
-        out_name = f"{spec.id}_no_enrich" if no_enr else None
-        log.info("=== Embedding model: %s (%s) ===", spec.id, enrichment_mode)
+        out_suffix = {
+            "baseline_full": None,
+            "no_enrich": "_no_enrich",
+            "depth_aware_v1": "_depth_aware_v1",
+        }[policy]
+        out_name = f"{spec.id}{out_suffix}" if out_suffix else None
+        log.info("=== Embedding model: %s (%s) ===", spec.id, policy)
         try:
             run_one_model(
                 spec,
@@ -381,7 +428,7 @@ def main() -> None:
                 st_batch_size=args.st_batch_size,
                 st_device=args.st_device,
                 voyage_batch_size=args.voyage_batch_size,
-                enrichment_mode=enrichment_mode,
+                enrichment_mode=policy,
                 output_model_dir_name=out_name,
             )
         except Exception as exc:
