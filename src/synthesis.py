@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""
+synthesis.py — Grounded answer synthesis with citations.
+
+Builds a Gemini-optimized prompt from retrieval output, calls the LLM via
+OpenRouter, and returns a structured response payload for the API/frontend.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from pathlib import Path
+from typing import Any
+
+import httpx
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+from src.retrieval.models import RetrievalResult, SearchResult
+
+load_dotenv()
+
+
+DISCLAIMER_TEXT = "This tool surfaces community experience, not medical advice."
+ANCHOR_PATTERN = re.compile(r"\[(\d+)\]")
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+SYSTEM_PROMPT_PATH = PROMPTS_DIR / "synthesis_system_prompt.txt"
+USER_PROMPT_PATH = PROMPTS_DIR / "synthesis_user_prompt.txt"
+
+
+class Source(BaseModel):
+    anchor: int = Field(..., ge=1, description="Citation anchor number used in answer markdown.")
+    chunk_id: str = Field(..., description="Chunk identifier used for this citation.")
+    permalink: str = Field(default="", description="Source permalink for frontend citation cards.")
+    post_title: str = Field(default="", description="Parent thread title.")
+    chunk_type: str = Field(default="", description="Chunk type: comment or post.")
+    comment_score: int | None = Field(default=None, description="Comment upvote score, when source is a comment.")
+    post_score: int | None = Field(default=None, description="Post upvote score, when source is a post.")
+    num_comments: int | None = Field(default=None, description="Number of comments in the post, when source is a post.")
+    created_utc: int | None = Field(default=None, description="Unix timestamp from source metadata.")
+
+
+class ResponseMetadata(BaseModel):
+    model: str
+    temperature: float
+    latency_ms: int
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    chunks_provided: int
+
+
+class SynthesisResponse(BaseModel):
+    answer: str = Field(..., description="Markdown synthesis with inline [n] anchors.")
+    sources: list[Source] = Field(default_factory=list)
+    disclaimer: str = DISCLAIMER_TEXT
+    metadata: ResponseMetadata
+
+
+class SynthesisConfig(BaseModel):
+    model: str = "google/gemini-2.5-flash"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    temperature: float = 0.1
+    max_tokens: int = 1800
+    timeout_s: float = 60.0
+    max_chunks_in_context: int = 25
+
+
+def _format_chunk_block(anchor: int, result: SearchResult) -> str:
+    m = result.metadata
+    score = m.comment_score if m.comment_score is not None else m.post_score
+    body = (result.text or "").strip()
+    return (
+        f"<SOURCE_{anchor}>\n"
+        f"chunk_id: {result.chunk_id}\n"
+        f"chunk_type: {m.chunk_type}\n"
+        f"post_title: {m.post_title}\n"
+        f"permalink: {m.permalink}\n"
+        f"created_utc: {m.created_utc}\n"
+        f"comment_score: {score}\n"
+        f"num_comments: {m.num_comments}\n"
+        f"text: {body}\n"
+        f"</SOURCE_{anchor}>"
+    )
+
+
+def pack_context(results: list[SearchResult], *, max_chunks: int) -> str:
+    """
+    Pack retrieval results into structured, delimited context blocks.
+
+    Anchors map 1:1 to position in this packed context.
+    """
+    blocks: list[str] = []
+    for idx, item in enumerate(results[:max_chunks], start=1):
+        blocks.append(_format_chunk_block(idx, item))
+    return "\n\n".join(blocks)
+
+
+def _load_prompt_template(path: Path) -> str:
+    if not path.exists():
+        raise ValueError(f"Prompt template not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def build_system_prompt() -> str:
+    """Load and render the system prompt template."""
+    template = _load_prompt_template(SYSTEM_PROMPT_PATH)
+    return template.format(disclaimer_text=DISCLAIMER_TEXT)
+
+
+def build_user_prompt(retrieval: RetrievalResult, packed_context: str) -> str:
+    """Load and render the user prompt template."""
+    template = _load_prompt_template(USER_PROMPT_PATH)
+    rewritten_query = retrieval.query.best_rewrite.query
+    intent = retrieval.query.intent.value
+    return template.format(
+        original_query=retrieval.query.original_query,
+        rewritten_query=rewritten_query,
+        intent=intent,
+        packed_context=packed_context,
+    )
+
+
+def _strip_json_fences(raw: str) -> str:
+    if not raw.startswith("```"):
+        return raw.strip()
+    lines = raw.splitlines()
+    cleaned = [line for line in lines if not line.strip().startswith("```")]
+    return "\n".join(cleaned).strip()
+
+
+def _extract_sources(answer_markdown: str, results: list[SearchResult]) -> list[Source]:
+    anchors_in_text = {int(match) for match in ANCHOR_PATTERN.findall(answer_markdown)}
+    valid_anchors = sorted(a for a in anchors_in_text if 1 <= a <= len(results))
+    sources: list[Source] = []
+    for anchor in valid_anchors:
+        result = results[anchor - 1]
+        m = result.metadata
+        sources.append(
+            Source(
+                anchor=anchor,
+                chunk_id=result.chunk_id,
+                permalink=m.permalink or "",
+                post_title=m.post_title or "",
+                chunk_type=m.chunk_type or "",
+                comment_score=m.comment_score,
+                post_score=m.post_score,
+                num_comments=m.num_comments,
+                created_utc=m.created_utc,
+            )
+        )
+    return sources
+
+
+def generate_synthesis(
+    retrieval: RetrievalResult,
+    *,
+    cfg: SynthesisConfig | None = None,
+    api_key: str | None = None,
+) -> SynthesisResponse:
+    """
+    Generate grounded synthesis from retrieval output.
+
+    Args:
+        retrieval: Retrieval pipeline output (query + ranked results).
+        cfg: Optional synthesis config overrides.
+        api_key: Optional OpenRouter key; falls back to OPENROUTER_API_KEY.
+
+    Raises:
+        ValueError: missing key, empty context, invalid LLM output.
+        httpx.HTTPError: networking/API errors.
+    """
+    cfg = cfg or SynthesisConfig()
+    key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
+    if not key:
+        raise ValueError("OPENROUTER_API_KEY is not set")
+    if not retrieval.results:
+        raise ValueError("Retrieval results are empty; cannot synthesize grounded response.")
+
+    context_results = retrieval.results[: cfg.max_chunks_in_context]
+    packed_context = pack_context(
+        context_results,
+        max_chunks=cfg.max_chunks_in_context,
+    )
+    system_prompt = build_system_prompt()
+    user_prompt = build_user_prompt(retrieval, packed_context)
+
+    payload: dict[str, Any] = {
+        "model": cfg.model,
+        "temperature": cfg.temperature,
+        "max_tokens": cfg.max_tokens,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": os.environ.get("APP_URL", "http://localhost:3000"),
+    }
+    url = f"{cfg.openrouter_base_url.rstrip('/')}/chat/completions"
+
+    started = time.perf_counter()
+    with httpx.Client(timeout=cfg.timeout_s) as client:
+        response = client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+    body = response.json()
+    raw = body["choices"][0]["message"]["content"].strip()
+    cleaned = _strip_json_fences(raw)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Synthesis model returned non-JSON output: {cleaned[:300]}") from exc
+
+    answer_markdown = (parsed.get("answer_markdown") or "").strip()
+    if not answer_markdown:
+        raise ValueError("Synthesis model returned empty answer_markdown.")
+
+    sources = _extract_sources(answer_markdown, context_results)
+    usage = body.get("usage", {})
+    metadata = ResponseMetadata(
+        model=cfg.model,
+        temperature=cfg.temperature,
+        latency_ms=elapsed_ms,
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+        chunks_provided=len(context_results),
+    )
+
+    return SynthesisResponse(
+        answer=answer_markdown,
+        sources=sources,
+        disclaimer=DISCLAIMER_TEXT,
+        metadata=metadata,
+    )
