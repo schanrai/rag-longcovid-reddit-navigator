@@ -4,6 +4,11 @@ synthesis.py — Grounded answer synthesis with citations.
 
 Builds a Gemini-optimized prompt from retrieval output, calls the LLM via
 OpenRouter, and returns a structured response payload for the API/frontend.
+
+Interim telemetry (pre–Module 6): configure the `src.synthesis` logger (or root)
+for your environment. At DEBUG: full system prompt, full user prompt, and raw
+LLM message body before JSON parse. At INFO: cited-vs-provided chunk ratio per
+request. No external tracing; defer Arize/Phoenix to Module 6.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.retrieval.models import RetrievalResult, SearchResult
 
@@ -84,6 +89,57 @@ class SynthesisConfig(BaseModel):
         ge=0.0,
         description="Upper cap on sleep between retries and on Retry-After (seconds).",
     )
+    answer_word_target_min: int = Field(
+        default=200,
+        ge=50,
+        le=800,
+        description=(
+            "Soft minimum word count for the entire answer_markdown string (editorial guidance): "
+            "headings, bullet prose, anchors like [1], and the disclaimer all count toward this band. "
+            "Pydantic ge/le: inclusive allowed range for this numeric setting."
+        ),
+    )
+    answer_word_target_max: int = Field(
+        default=520,
+        ge=80,
+        le=1200,
+        description=(
+            "Soft maximum word count for the entire answer_markdown string (same scope as min). "
+            "Pydantic ge/le: inclusive allowed range for this numeric setting."
+        ),
+    )
+    topic_heading_target_min: int = Field(
+        default=2,
+        ge=1,
+        le=12,
+        description=(
+            "Minimum distinct **Topic Heading** sections when sources support them; "
+            "pair with answer_word_* for short, one-paragraph-per-topic answers."
+        ),
+    )
+    topic_heading_target_max: int = Field(
+        default=4,
+        ge=1,
+        le=12,
+        description=(
+            "Maximum distinct **Topic Heading** sections; keep low when word budget is tight "
+            "(e.g. one short paragraph of prose per heading within answer_word_*)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_editorial_targets(self) -> SynthesisConfig:
+        if self.answer_word_target_min > self.answer_word_target_max:
+            raise ValueError(
+                "answer_word_target_min must be <= answer_word_target_max "
+                f"({self.answer_word_target_min} > {self.answer_word_target_max})"
+            )
+        if self.topic_heading_target_min > self.topic_heading_target_max:
+            raise ValueError(
+                "topic_heading_target_min must be <= topic_heading_target_max "
+                f"({self.topic_heading_target_min} > {self.topic_heading_target_max})"
+            )
+        return self
 
 
 # HTTP status codes worth retrying (rate limits + gateway / upstream instability).
@@ -244,10 +300,16 @@ def _load_prompt_template(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def build_system_prompt() -> str:
-    """Load and render the system prompt template."""
+def build_system_prompt(cfg: SynthesisConfig) -> str:
+    """Load and render the system prompt template (includes editorial length / topic targets)."""
     template = _load_prompt_template(SYSTEM_PROMPT_PATH)
-    return template.format(disclaimer_text=DISCLAIMER_TEXT)
+    return template.format(
+        disclaimer_text=DISCLAIMER_TEXT,
+        answer_word_target_min=cfg.answer_word_target_min,
+        answer_word_target_max=cfg.answer_word_target_max,
+        topic_heading_target_min=cfg.topic_heading_target_min,
+        topic_heading_target_max=cfg.topic_heading_target_max,
+    )
 
 
 def build_user_prompt(retrieval: RetrievalResult, packed_context: str) -> str:
@@ -313,6 +375,10 @@ def generate_synthesis(
         TimeoutError: all attempts failed due to request timeout (see chained cause).
         httpx.HTTPError: non-retryable HTTP errors or exhausted retries.
         httpx.RequestError: exhausted retries on transport errors.
+
+    Logging:
+        DEBUG — full system prompt, full user prompt, raw assistant message before JSON parse.
+        INFO — cited N of M chunks, plus model id and wall latency (synthesis HTTP only).
     """
     cfg = cfg or SynthesisConfig()
     key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
@@ -326,8 +392,10 @@ def generate_synthesis(
         context_results,
         max_chunks=cfg.max_chunks_in_context,
     )
-    system_prompt = build_system_prompt()
+    system_prompt = build_system_prompt(cfg)
     user_prompt = build_user_prompt(retrieval, packed_context)
+    log.debug("synthesis system prompt (full):\n%s", system_prompt)
+    log.debug("synthesis user prompt (full):\n%s", user_prompt)
 
     payload: dict[str, Any] = {
         "model": cfg.model,
@@ -359,6 +427,7 @@ def generate_synthesis(
 
     body = response.json()
     raw = body["choices"][0]["message"]["content"].strip()
+    log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
     cleaned = _strip_json_fences(raw)
     try:
         parsed = json.loads(cleaned)
@@ -370,6 +439,15 @@ def generate_synthesis(
         raise ValueError("Synthesis model returned empty answer_markdown.")
 
     sources = _extract_sources(answer_markdown, context_results)
+    provided = len(context_results)
+    cited = len(sources)
+    log.info(
+        "synthesis citation coverage: cited %d of %d chunks (model=%s, latency_ms=%d)",
+        cited,
+        provided,
+        cfg.model,
+        elapsed_ms,
+    )
     usage = body.get("usage", {})
     metadata = ResponseMetadata(
         model=cfg.model,
