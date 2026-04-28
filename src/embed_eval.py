@@ -82,7 +82,13 @@ DEFAULT_MODELS: list[EmbeddingModelSpec] = [
 ]
 
 
-EnrichmentPolicy = Literal["baseline_full", "no_enrich", "depth_aware_v1"]
+EnrichmentPolicy = Literal[
+    "baseline_full",
+    "no_enrich",
+    "depth_aware_v1",
+    "depth_aware_v2",
+    "depth_aware_blend",
+]
 
 
 def _depth_from_record(rec: dict[str, Any]) -> int | None:
@@ -106,10 +112,19 @@ def compose_embedding_input(
     Policies:
     - baseline_full: comment t1_ uses title+summary+body (or title+body when no summary)
     - no_enrich: comment t1_ uses body only
+    THESE POLICIES ARE NOT USED IN THE CURRENT RUN AND ARE NOT CORRECTLY DESIGNED> USE BASELINE_FULL INSTEAD
     - depth_aware_v1:
       - depth 0-1: title+summary+body
       - depth 2-3: title+body
       - depth 4+: parent_first_sentence+body (fallback body-only)
+    - depth_aware_v2:
+      - depth 0-1: title+summary+body
+      - depth 2: title+body
+      - depth 3+: parent_first_sentence+body (fallback body-only)
+    - depth_aware_blend:
+      - depth 0-1: title+summary+body
+      - depth 2: title+body
+      - depth 3+: title+parent_first_sentence+body (fallback title+body)
     Post t3_ always uses title+body.
     """
     title = (rec.get("post_title") or "").strip()
@@ -127,6 +142,30 @@ def compose_embedding_input(
         parent_first = (rec.get("parent_first_sentence") or "").strip()
         if depth is not None and depth >= 4:
             return "\n\n".join(p for p in (parent_first, body) if p)
+        if depth is not None and depth >= 2:
+            return "\n\n".join(p for p in (title, body) if p)
+        # depth 0-1, unknown, or malformed: conservative baseline behavior
+        return "\n\n".join(p for p in (title, summary, body) if p)
+
+    if enrichment_policy == "depth_aware_v2":
+        depth = _depth_from_record(rec)
+        summary = (rec.get("post_summary") or "").strip()
+        parent_first = (rec.get("parent_first_sentence") or "").strip()
+        if depth is not None and depth >= 3:
+            return "\n\n".join(p for p in (parent_first, body) if p)
+        if depth is not None and depth >= 2:
+            return "\n\n".join(p for p in (title, body) if p)
+        # depth 0-1, unknown, or malformed: conservative baseline behavior
+        return "\n\n".join(p for p in (title, summary, body) if p)
+
+    if enrichment_policy == "depth_aware_blend":
+        depth = _depth_from_record(rec)
+        summary = (rec.get("post_summary") or "").strip()
+        parent_first = (rec.get("parent_first_sentence") or "").strip()
+        if depth is not None and depth >= 3:
+            if parent_first:
+                return "\n\n".join(p for p in (title, parent_first, body) if p)
+            return "\n\n".join(p for p in (title, body) if p)
         if depth is not None and depth >= 2:
             return "\n\n".join(p for p in (title, body) if p)
         # depth 0-1, unknown, or malformed: conservative baseline behavior
@@ -317,19 +356,33 @@ def run_one_model(
     np.save(out_dir / "chunks.npy", chunk_vecs)
     np.save(out_dir / "queries.npy", query_vecs)
 
+    if enrichment_mode == "baseline_full":
+        compose_desc = "title+summary+body (t1) / title+body (t3)"
+    elif enrichment_mode == "no_enrich":
+        compose_desc = "body-only (t1) / title+body (t3)"
+    elif enrichment_mode == "depth_aware_v1":
+        compose_desc = (
+            "depth_aware_v1: depth0-1 title+summary+body; depth2-3 title+body; "
+            "depth4+ parent_first_sentence+body; t3 title+body"
+        )
+    elif enrichment_mode == "depth_aware_v2":
+        compose_desc = (
+            "depth_aware_v2: depth0-1 title+summary+body; depth2 title+body; "
+            "depth3+ parent_first_sentence+body; t3 title+body"
+        )
+    elif enrichment_mode == "depth_aware_blend":
+        compose_desc = (
+            "depth_aware_blend: depth0-1 title+summary+body; depth2 title+body; "
+            "depth3+ title+parent_first_sentence+body (fallback title+body); t3 title+body"
+        )
+    else:
+        compose_desc = str(enrichment_mode)
+
     index = {
         "schema": SCHEMA_INDEX,
         "model_spec_id": spec.id,
         "enrichment": enrichment_mode,
-        "compose": (
-            "title+summary+body (t1) / title+body (t3)"
-            if enrichment_mode == "baseline_full"
-            else (
-                "body-only (t1) / title+body (t3)"
-                if enrichment_mode == "no_enrich"
-                else "depth_aware_v1: depth0-1 title+summary+body; depth2-3 title+body; depth4+ parent_first_sentence+body; t3 title+body"
-            )
-        ),
+        "compose": compose_desc,
         "kind": spec.kind,
         "sentence_transformers_model": spec.sentence_transformers_model,
         "voyage_model": spec.voyage_model,
@@ -367,7 +420,13 @@ def main() -> None:
     )
     ap.add_argument(
         "--enrichment-policy",
-        choices=["baseline_full", "no_enrich", "depth_aware_v1"],
+        choices=[
+            "baseline_full",
+            "no_enrich",
+            "depth_aware_v1",
+            "depth_aware_v2",
+            "depth_aware_blend",
+        ],
         default=None,
         help="Explicit embedding composition policy. Prefer this over --no-enrichment.",
     )
@@ -414,6 +473,8 @@ def main() -> None:
             "baseline_full": None,
             "no_enrich": "_no_enrich",
             "depth_aware_v1": "_depth_aware_v1",
+            "depth_aware_v2": "_depth_aware_v2",
+            "depth_aware_blend": "_depth_aware_blend",
         }[policy]
         out_name = f"{spec.id}{out_suffix}" if out_suffix else None
         log.info("=== Embedding model: %s (%s) ===", spec.id, policy)

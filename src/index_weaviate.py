@@ -22,7 +22,9 @@ Usage:
   python3 src/index_weaviate.py --skip-comments      # post chunks only
   python3 src/index_weaviate.py --skip-posts         # comment chunks only
   python3 src/index_weaviate.py --recreate           # drop + recreate collection first
-  python3 src/index_weaviate.py --enrichment-policy depth_aware_v1   # match scope / eval gate
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_v1   # match original depth-aware eval gate
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_v2   # depth3+ parent_first_sentence+body
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_blend  # depth3+ title+parent_first_sentence+body
 
 Long runs: run in a standalone terminal (not IDE) to avoid OOM/timeout issues:
   python3 -u src/index_weaviate.py 2>&1 | tee reports/index_weaviate_run.log
@@ -121,6 +123,7 @@ def create_collection(client: weaviate.WeaviateClient) -> None:
 
             # ── Thread metadata ───────────────────────────────────────────────
             Property(name="nest_level",  data_type=DataType.INT,  skip_vectorization=True),
+            Property(name="parent_first_sentence", data_type=DataType.TEXT, skip_vectorization=True),
             Property(name="is_submitter",data_type=DataType.BOOL, skip_vectorization=True),
             Property(name="stickied",    data_type=DataType.BOOL, skip_vectorization=True),
             Property(name="created_utc", data_type=DataType.INT,  skip_vectorization=True),
@@ -202,7 +205,7 @@ def chunk_to_properties(rec: dict[str, Any], chunk_type: str) -> dict[str, Any]:
     None values are omitted — Weaviate treats missing properties as null.
     """
     props: dict[str, Any] = {
-        "chunk_id":    str(rec.get("chunk_id") or ""),
+        "chunk_id":    str(rec.get("chunk_id") or "").strip(),
         "text":        str(rec.get("text") or ""),
         "post_title":  str(rec.get("post_title") or ""),
         "chunk_type":  chunk_type,
@@ -226,6 +229,13 @@ def chunk_to_properties(rec: dict[str, Any], chunk_type: str) -> dict[str, Any]:
         props["parent_id"]     = str(rec.get("parent_id") or "")
         props["nest_level"]    = int(rec.get("nest_level") or 0)
         props["is_submitter"]  = bool(rec.get("is_submitter", False))
+        # Observability contract: store parent sentence only where v2 policy uses it.
+        # For depth >= 3 comments we persist the parent sentence when available;
+        # otherwise leave the property unset (null/missing in Weaviate).
+        if props["nest_level"] >= 3:
+            parent_first = (rec.get("parent_first_sentence") or "").strip()
+            if parent_first:
+                props["parent_first_sentence"] = parent_first
     else:
         props["post_score"]      = int(rec.get("post_score") or 0)
         props["num_comments"]    = int(rec.get("num_comments") or 0)
@@ -296,7 +306,9 @@ def ingest_jsonl(
         failed = collection.batch.failed_objects
         if failed:
             for fo in failed:
-                msg = f"chunk_id={fo.original_uuid} err={fo.message}"
+                props = getattr(fo.object_, "properties", None) or {}
+                cid = props.get("chunk_id", fo.original_uuid)
+                msg = f"chunk_id={cid} err={fo.message}"
                 stats.errors.append(msg)
                 log.warning("Weaviate ingest error: %s", msg)
             stats.failed += len(failed)
@@ -400,10 +412,11 @@ def main() -> None:
     ap.add_argument("--voyage-batch",  type=int, default=VOYAGE_BATCH_MAX)
     ap.add_argument(
         "--enrichment-policy",
-        choices=("baseline_full", "no_enrich", "depth_aware_v1"),
+        choices=("baseline_full", "no_enrich", "depth_aware_v1", "depth_aware_v2", "depth_aware_blend"),
         default="baseline_full",
         help="Embedding input composition (same as embed_eval.compose_embedding_input). "
-        "Use depth_aware_v1 for reconstructed nest_level + parent_first_sentence corpus.",
+        "Use depth_aware_v1, depth_aware_v2, or depth_aware_blend for reconstructed "
+        "nest_level + parent_first_sentence corpus.",
     )
     ap.add_argument(
         "--out", type=Path,
@@ -440,7 +453,7 @@ def main() -> None:
     client = weaviate.connect_to_weaviate_cloud(
         cluster_url=weaviate_url,
         auth_credentials=Auth.api_key(weaviate_key),
-        additional_config=AdditionalConfig(timeout=Timeout(init=60, query=60, insert=120)),
+        additional_config=AdditionalConfig(timeout=Timeout(init=60, query=120, insert=300)),
         skip_init_checks=True,
     )
 
@@ -484,7 +497,9 @@ def main() -> None:
             )
 
         report = build_report(
-            comment_stats, post_stats, COLLECTION_NAME,
+            comment_stats,
+            post_stats,
+            COLLECTION_NAME,
             enrichment_policy=enrichment_policy,
         )
         args.out.parent.mkdir(parents=True, exist_ok=True)
