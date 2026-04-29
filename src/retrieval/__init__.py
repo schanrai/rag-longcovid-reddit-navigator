@@ -12,6 +12,7 @@ Modules:
 """
 from .config import RetrievalConfig
 from .hybrid_search import dedup_results, search
+from .pipeline import retrieve
 from .ranking import rank
 from .reranker import rerank
 from .models import (
@@ -26,6 +27,7 @@ from .models import (
 
 __all__ = [
     "RetrievalConfig",
+    "retrieve",
     "search",
     "dedup_results",
     "rerank",

@@ -316,11 +316,9 @@ def build_user_prompt(retrieval: RetrievalResult, packed_context: str) -> str:
     """Load and render the user prompt template."""
     template = _load_prompt_template(USER_PROMPT_PATH)
     rewritten_query = retrieval.query.best_rewrite.query
-    intent = retrieval.query.intent.value
     return template.format(
         original_query=retrieval.query.original_query,
         rewritten_query=rewritten_query,
-        intent=intent,
         packed_context=packed_context,
     )
 
@@ -331,6 +329,86 @@ def _strip_json_fences(raw: str) -> str:
     lines = raw.splitlines()
     cleaned = [line for line in lines if not line.strip().startswith("```")]
     return "\n".join(cleaned).strip()
+
+
+def _extract_answer_markdown_loose(cleaned: str) -> str | None:
+    """
+    Recover answer_markdown when the model emits invalid JSON (common case:
+    unescaped \" inside the answer_markdown string).
+
+    Assumes a single top-level \"answer_markdown\" string (optional trailing keys
+    after a comma are handled by treating a quote followed by , or } as closing).
+    """
+    match = re.search(r'"answer_markdown"\s*:\s*"', cleaned)
+    if not match:
+        return None
+    i = match.end()
+    out: list[str] = []
+    n = len(cleaned)
+    while i < n:
+        c = cleaned[i]
+        if c == "\\" and i + 1 < n:
+            esc = cleaned[i + 1]
+            if esc == "n":
+                out.append("\n")
+                i += 2
+                continue
+            if esc == "t":
+                out.append("\t")
+                i += 2
+                continue
+            if esc == "r":
+                out.append("\r")
+                i += 2
+                continue
+            if esc == '"':
+                out.append('"')
+                i += 2
+                continue
+            if esc == "\\":
+                out.append("\\")
+                i += 2
+                continue
+            if esc == "u" and i + 6 <= n:
+                hex_part = cleaned[i + 2 : i + 6]
+                if len(hex_part) == 4 and all(
+                    ch in "0123456789abcdefABCDEF" for ch in hex_part
+                ):
+                    out.append(chr(int(hex_part, 16)))
+                    i += 6
+                    continue
+            out.append(c)
+            out.append(esc)
+            i += 2
+            continue
+        if c == '"':
+            tail = cleaned[i + 1 :].lstrip()
+            if tail.startswith("}") or tail.startswith(","):
+                break
+            out.append('"')
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    text = "".join(out)
+    return text.strip() or None
+
+
+def _parse_synthesis_payload(cleaned: str) -> dict[str, Any]:
+    """Parse strict JSON, or fall back to loose extraction of answer_markdown."""
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        loose = _extract_answer_markdown_loose(cleaned)
+        if loose is None:
+            raise ValueError(
+                f"Synthesis model returned non-JSON output: {cleaned[:300]}"
+            ) from exc
+        log.warning(
+            "synthesis JSON parse failed (%s); recovered answer_markdown via loose extractor",
+            exc,
+        )
+        return {"answer_markdown": loose}
 
 
 def _extract_sources(answer_markdown: str, results: list[SearchResult]) -> list[Source]:
@@ -429,10 +507,7 @@ def generate_synthesis(
     raw = body["choices"][0]["message"]["content"].strip()
     log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
     cleaned = _strip_json_fences(raw)
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Synthesis model returned non-JSON output: {cleaned[:300]}") from exc
+    parsed = _parse_synthesis_payload(cleaned)
 
     answer_markdown = (parsed.get("answer_markdown") or "").strip()
     if not answer_markdown:

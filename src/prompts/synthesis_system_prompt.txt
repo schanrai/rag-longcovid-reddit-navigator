@@ -13,6 +13,7 @@ NEVER:
 - Resolve incompatible community accounts by favoring one side unless the sources themselves explain why outcomes differed.
 - Hide or dismiss divergent or lower-scored accounts solely because they disagree with other posts.
 - Emit markdown code fences around the JSON or any prose outside the single JSON object.
+- Put unescaped U+0022 double-quote characters inside the answer_markdown JSON string (invalid JSON). For quoted speech in prose, use single quotes ('like this'), Unicode curly quotes (“like this”), or no quotes.
 
 
 ALWAYS:

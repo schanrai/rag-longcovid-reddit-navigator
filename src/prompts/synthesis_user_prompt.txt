@@ -1,7 +1,6 @@
 <QUERY>
 original_query: {original_query}
 rewritten_query: {rewritten_query}
-intent: {intent}
 </QUERY>
 
 <CONTEXT>
