@@ -22,6 +22,9 @@ Usage:
   python3 src/index_weaviate.py --skip-comments      # post chunks only
   python3 src/index_weaviate.py --skip-posts         # comment chunks only
   python3 src/index_weaviate.py --recreate           # drop + recreate collection first
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_v1   # match original depth-aware eval gate
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_v2   # depth3+ parent_first_sentence+body
+  python3 src/index_weaviate.py --enrichment-policy depth_aware_blend  # depth3+ title+parent_first_sentence+body
 
 Long runs: run in a standalone terminal (not IDE) to avoid OOM/timeout issues:
   python3 -u src/index_weaviate.py 2>&1 | tee reports/index_weaviate_run.log
@@ -48,7 +51,7 @@ from weaviate.classes.init import Auth, AdditionalConfig, Timeout
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 sys.path.insert(0, str(Path(__file__).parent))
-from embed_eval import compose_embedding_input
+from embed_eval import EnrichmentPolicy, compose_embedding_input
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,6 +123,7 @@ def create_collection(client: weaviate.WeaviateClient) -> None:
 
             # ── Thread metadata ───────────────────────────────────────────────
             Property(name="nest_level",  data_type=DataType.INT,  skip_vectorization=True),
+            Property(name="parent_first_sentence", data_type=DataType.TEXT, skip_vectorization=True),
             Property(name="is_submitter",data_type=DataType.BOOL, skip_vectorization=True),
             Property(name="stickied",    data_type=DataType.BOOL, skip_vectorization=True),
             Property(name="created_utc", data_type=DataType.INT,  skip_vectorization=True),
@@ -201,7 +205,7 @@ def chunk_to_properties(rec: dict[str, Any], chunk_type: str) -> dict[str, Any]:
     None values are omitted — Weaviate treats missing properties as null.
     """
     props: dict[str, Any] = {
-        "chunk_id":    str(rec.get("chunk_id") or ""),
+        "chunk_id":    str(rec.get("chunk_id") or "").strip(),
         "text":        str(rec.get("text") or ""),
         "post_title":  str(rec.get("post_title") or ""),
         "chunk_type":  chunk_type,
@@ -225,6 +229,13 @@ def chunk_to_properties(rec: dict[str, Any], chunk_type: str) -> dict[str, Any]:
         props["parent_id"]     = str(rec.get("parent_id") or "")
         props["nest_level"]    = int(rec.get("nest_level") or 0)
         props["is_submitter"]  = bool(rec.get("is_submitter", False))
+        # Observability contract: store parent sentence only where v2 policy uses it.
+        # For depth >= 3 comments we persist the parent sentence when available;
+        # otherwise leave the property unset (null/missing in Weaviate).
+        if props["nest_level"] >= 3:
+            parent_first = (rec.get("parent_first_sentence") or "").strip()
+            if parent_first:
+                props["parent_first_sentence"] = parent_first
     else:
         props["post_score"]      = int(rec.get("post_score") or 0)
         props["num_comments"]    = int(rec.get("num_comments") or 0)
@@ -255,6 +266,7 @@ def ingest_jsonl(
     collection: Any,
     voyage_key: str,
     *,
+    enrichment_policy: EnrichmentPolicy = "baseline_full",
     limit: int | None = None,
     weaviate_batch_size: int = WEAVIATE_BATCH_SIZE,
     voyage_batch_size: int = VOYAGE_BATCH_MAX,
@@ -273,7 +285,10 @@ def ingest_jsonl(
     def flush(batch: list[dict[str, Any]]) -> None:
         if not batch:
             return
-        texts = [compose_embedding_input(r) for r in batch]
+        texts = [
+            compose_embedding_input(r, enrichment_policy=enrichment_policy)
+            for r in batch
+        ]
         vectors = voyage_embed_batch(
             texts,
             api_key=voyage_key,
@@ -291,13 +306,20 @@ def ingest_jsonl(
         failed = collection.batch.failed_objects
         if failed:
             for fo in failed:
-                msg = f"chunk_id={fo.original_uuid} err={fo.message}"
+                props = getattr(fo.object_, "properties", None) or {}
+                cid = props.get("chunk_id", fo.original_uuid)
+                msg = f"chunk_id={cid} err={fo.message}"
                 stats.errors.append(msg)
                 log.warning("Weaviate ingest error: %s", msg)
             stats.failed += len(failed)
         stats.indexed += len(batch) - len(failed)
 
-    log.info("=== Ingesting %s from %s ===", chunk_type, path.name)
+    log.info(
+        "=== Ingesting %s from %s (enrichment_policy=%s) ===",
+        chunk_type,
+        path.name,
+        enrichment_policy,
+    )
     with path.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -342,11 +364,14 @@ def build_report(
     comment_stats: IngestStats | None,
     post_stats: IngestStats | None,
     collection_name: str,
+    *,
+    enrichment_policy: EnrichmentPolicy,
 ) -> dict[str, Any]:
     return {
         "schema": "index_report_v1",
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         "collection": collection_name,
+        "enrichment_policy": enrichment_policy,
         "voyage_model": VOYAGE_MODEL,
         "comment_chunks": {
             "indexed": comment_stats.indexed if comment_stats else 0,
@@ -386,10 +411,19 @@ def main() -> None:
     ap.add_argument("--weaviate-batch",type=int, default=WEAVIATE_BATCH_SIZE)
     ap.add_argument("--voyage-batch",  type=int, default=VOYAGE_BATCH_MAX)
     ap.add_argument(
+        "--enrichment-policy",
+        choices=("baseline_full", "no_enrich", "depth_aware_v1", "depth_aware_v2", "depth_aware_blend"),
+        default="baseline_full",
+        help="Embedding input composition (same as embed_eval.compose_embedding_input). "
+        "Use depth_aware_v1, depth_aware_v2, or depth_aware_blend for reconstructed "
+        "nest_level + parent_first_sentence corpus.",
+    )
+    ap.add_argument(
         "--out", type=Path,
         default=cfg.reports_dir / cfg.report_out,
     )
     args = ap.parse_args()
+    enrichment_policy: EnrichmentPolicy = args.enrichment_policy
 
     voyage_key = os.environ.get("VOYAGE_API_KEY", "").strip()
     weaviate_url = os.environ.get("WEAVIATE_URL", "").strip()
@@ -411,11 +445,15 @@ def main() -> None:
             log.error("Missing file: %s", p)
             sys.exit(1)
 
-    log.info("Connecting to Weaviate Cloud: %s", weaviate_url)
+    log.info(
+        "Connecting to Weaviate Cloud: %s (enrichment_policy=%s)",
+        weaviate_url,
+        enrichment_policy,
+    )
     client = weaviate.connect_to_weaviate_cloud(
         cluster_url=weaviate_url,
         auth_credentials=Auth.api_key(weaviate_key),
-        additional_config=AdditionalConfig(timeout=Timeout(init=60, query=60, insert=120)),
+        additional_config=AdditionalConfig(timeout=Timeout(init=60, query=120, insert=300)),
         skip_init_checks=True,
     )
 
@@ -443,6 +481,7 @@ def main() -> None:
         if not args.skip_comments:
             comment_stats = ingest_jsonl(
                 comment_path, "comment", collection, voyage_key,
+                enrichment_policy=enrichment_policy,
                 limit=args.limit,
                 weaviate_batch_size=args.weaviate_batch,
                 voyage_batch_size=args.voyage_batch,
@@ -451,12 +490,18 @@ def main() -> None:
         if not args.skip_posts:
             post_stats = ingest_jsonl(
                 post_path, "post", collection, voyage_key,
+                enrichment_policy=enrichment_policy,
                 limit=args.limit,
                 weaviate_batch_size=args.weaviate_batch,
                 voyage_batch_size=args.voyage_batch,
             )
 
-        report = build_report(comment_stats, post_stats, COLLECTION_NAME)
+        report = build_report(
+            comment_stats,
+            post_stats,
+            COLLECTION_NAME,
+            enrichment_policy=enrichment_policy,
+        )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         log.info("Wrote index report → %s", args.out)

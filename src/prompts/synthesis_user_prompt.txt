@@ -1,0 +1,15 @@
+<QUERY>
+original_query: {original_query}
+rewritten_query: {rewritten_query}
+</QUERY>
+
+<CONTEXT>
+{packed_context}
+</CONTEXT>
+
+<TASK>
+Write a grounded markdown response for the user query.
+Use short bolded section titles for each major claim, then explanatory prose.
+Attach citation anchors [n] inline per claim.
+If there is missing evidence, explicitly call out the gap.
+</TASK>
