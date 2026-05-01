@@ -37,6 +37,10 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "synthesis_system_prompt.txt"
 USER_PROMPT_PATH = PROMPTS_DIR / "synthesis_user_prompt.txt"
 
+# When the model returns prose or unrecoverable JSON, re-call OpenRouter (same messages)
+# before failing — keeps eval runs from aborting on occasional format slips.
+_SYNTHESIS_PARSE_MAX_ATTEMPTS = 3
+
 
 class Source(BaseModel):
     anchor: int = Field(..., ge=1, description="Citation anchor number used in answer markdown.")
@@ -68,7 +72,7 @@ class SynthesisResponse(BaseModel):
 
 
 class SynthesisConfig(BaseModel):
-    model: str = "google/gemini-2.5-flash"
+    model: str = "google/gemini-3-flash-preview"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     temperature: float = 0.1
     max_tokens: int = 1800
@@ -454,6 +458,9 @@ def generate_synthesis(
         httpx.HTTPError: non-retryable HTTP errors or exhausted retries.
         httpx.RequestError: exhausted retries on transport errors.
 
+    On invalid or empty ``answer_markdown`` JSON envelope, the OpenRouter call is
+    retried up to ``_SYNTHESIS_PARSE_MAX_ATTEMPTS`` times (same prompt) before raising.
+
     Logging:
         DEBUG — full system prompt, full user prompt, raw assistant message before JSON parse.
         INFO — cited N of M chunks, plus model id and wall latency (synthesis HTTP only).
@@ -493,25 +500,39 @@ def generate_synthesis(
     url = f"{cfg.openrouter_base_url.rstrip('/')}/chat/completions"
 
     started = time.perf_counter()
+    body: dict[str, Any] = {}
+    answer_markdown = ""
     with httpx.Client(timeout=cfg.timeout_s) as client:
-        response = _post_openrouter_chat_completions(
-            client=client,
-            url=url,
-            headers=headers,
-            payload=payload,
-            cfg=cfg,
-        )
+        for parse_attempt in range(_SYNTHESIS_PARSE_MAX_ATTEMPTS):
+            response = _post_openrouter_chat_completions(
+                client=client,
+                url=url,
+                headers=headers,
+                payload=payload,
+                cfg=cfg,
+            )
+            body = response.json()
+            raw = body["choices"][0]["message"]["content"].strip()
+            log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
+            cleaned = _strip_json_fences(raw)
+            try:
+                parsed = _parse_synthesis_payload(cleaned)
+                answer_markdown = (parsed.get("answer_markdown") or "").strip()
+                if not answer_markdown:
+                    raise ValueError("Synthesis model returned empty answer_markdown.")
+            except ValueError as exc:
+                log.warning(
+                    "synthesis JSON parse failed (attempt %d/%d): %s",
+                    parse_attempt + 1,
+                    _SYNTHESIS_PARSE_MAX_ATTEMPTS,
+                    exc,
+                )
+                if parse_attempt + 1 >= _SYNTHESIS_PARSE_MAX_ATTEMPTS:
+                    raise
+                time.sleep(min(2.0, 0.5 * (2**parse_attempt)))
+                continue
+            break
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-
-    body = response.json()
-    raw = body["choices"][0]["message"]["content"].strip()
-    log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
-    cleaned = _strip_json_fences(raw)
-    parsed = _parse_synthesis_payload(cleaned)
-
-    answer_markdown = (parsed.get("answer_markdown") or "").strip()
-    if not answer_markdown:
-        raise ValueError("Synthesis model returned empty answer_markdown.")
 
     sources = _extract_sources(answer_markdown, context_results)
     provided = len(context_results)

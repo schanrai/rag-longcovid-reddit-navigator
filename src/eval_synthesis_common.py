@@ -26,7 +26,7 @@ from src.synthesis import SynthesisResponse
 
 log = logging.getLogger(__name__)
 
-SYNTH_MODEL = "google/gemini-2.5-flash"
+SYNTH_MODEL = "google/gemini-3-flash-preview"
 JUDGE_MODEL = "google/gemini-2.5-flash"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -140,7 +140,7 @@ def call_judge(
     }
     payload: dict[str, Any] = {
         "model": JUDGE_MODEL,
-        "temperature": 0.2,
+        "temperature": 0.0,
         "max_tokens": 4096,
         "messages": [
             {"role": "system", "content": JUDGE_SYSTEM},
