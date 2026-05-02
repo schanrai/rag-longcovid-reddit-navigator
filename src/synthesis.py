@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import re
 import time
 from pathlib import Path
@@ -25,6 +24,8 @@ import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator
 
+from src.citation_verifier import verify_citations
+from src.openrouter_retry import post_openrouter_chat_completions
 from src.retrieval.models import RetrievalResult, SearchResult
 
 load_dotenv()
@@ -62,6 +63,8 @@ class ResponseMetadata(BaseModel):
     completion_tokens: int | None = None
     total_tokens: int | None = None
     chunks_provided: int
+    verifier_removed_anchors: list[int] = Field(default_factory=list)
+    verifier_latency_ms: int = 0
 
 
 class SynthesisResponse(BaseModel):
@@ -92,6 +95,13 @@ class SynthesisConfig(BaseModel):
         default=60.0,
         ge=0.0,
         description="Upper cap on sleep between retries and on Retry-After (seconds).",
+    )
+    verifier_enabled: bool = Field(
+        default=True,
+        description=(
+            "Run post-synthesis citation audit (second LLM call) to strip [n] anchors "
+            "not explicitly supported by SOURCE_n; disable for A/B tests or cost control."
+        ),
     )
     answer_word_target_min: int = Field(
         default=200,
@@ -144,128 +154,6 @@ class SynthesisConfig(BaseModel):
                 f"({self.topic_heading_target_min} > {self.topic_heading_target_max})"
             )
         return self
-
-
-# HTTP status codes worth retrying (rate limits + gateway / upstream instability).
-_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({408, 429, 502, 503, 504})
-
-
-def _retry_after_seconds(headers: httpx.Headers) -> float | None:
-    """Parse Retry-After as delay seconds; None if absent or not a plain integer/float."""
-    raw = headers.get("Retry-After")
-    if not raw:
-        return None
-    raw = raw.strip()
-    try:
-        return float(raw)
-    except ValueError:
-        # HTTP-date form — skip; caller falls back to exponential backoff.
-        return None
-
-
-def _http_status_retryable(status_code: int) -> bool:
-    return status_code in _RETRYABLE_HTTP_STATUSES
-
-
-def _backoff_seconds(
-    *,
-    attempt: int,
-    base_delay_s: float,
-    max_delay_s: float,
-    retry_after_s: float | None,
-) -> float:
-    """Compute sleep before the next attempt (attempt is 0-based index of the failed try)."""
-    if retry_after_s is not None and retry_after_s >= 0:
-        wait = retry_after_s
-    else:
-        exp = base_delay_s * (2**attempt)
-        jitter = 0.5 + random.random()
-        wait = exp * jitter
-    return min(max_delay_s, max(0.0, wait))
-
-
-def _post_openrouter_chat_completions(
-    *,
-    client: httpx.Client,
-    url: str,
-    headers: dict[str, str],
-    payload: dict[str, Any],
-    cfg: SynthesisConfig,
-) -> httpx.Response:
-    """
-    POST chat/completions with retries for transient failures.
-
-    Distinguishes timeout exhaustion (raises TimeoutError) from other failures
-    (re-raises the last exception).
-    """
-    last_exc: BaseException | None = None
-    last_was_timeout = False
-
-    for attempt in range(cfg.retry_attempts):
-        try:
-            response = client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            return response
-        except httpx.TimeoutException as exc:
-            last_exc = exc
-            last_was_timeout = True
-            log.warning(
-                "OpenRouter synthesis timeout (attempt %s/%s, timeout_s=%s): %s",
-                attempt + 1,
-                cfg.retry_attempts,
-                cfg.timeout_s,
-                exc,
-            )
-        except httpx.HTTPStatusError as exc:
-            last_exc = exc
-            last_was_timeout = False
-            code = exc.response.status_code
-            if not _http_status_retryable(code):
-                raise
-            retry_after: float | None = None
-            if code == 429:
-                retry_after = _retry_after_seconds(exc.response.headers)
-            log.warning(
-                "OpenRouter synthesis HTTP %s (attempt %s/%s)%s: %s",
-                code,
-                attempt + 1,
-                cfg.retry_attempts,
-                f", Retry-After={retry_after}s" if retry_after is not None else "",
-                exc,
-            )
-        except httpx.RequestError as exc:
-            last_exc = exc
-            last_was_timeout = False
-            log.warning(
-                "OpenRouter synthesis transport error (attempt %s/%s): %s",
-                attempt + 1,
-                cfg.retry_attempts,
-                exc,
-            )
-
-        if attempt + 1 >= cfg.retry_attempts:
-            break
-
-        retry_after_sleep: float | None = None
-        if isinstance(last_exc, httpx.HTTPStatusError) and last_exc.response.status_code == 429:
-            retry_after_sleep = _retry_after_seconds(last_exc.response.headers)
-
-        sleep_s = _backoff_seconds(
-            attempt=attempt,
-            base_delay_s=cfg.retry_base_delay_s,
-            max_delay_s=cfg.retry_max_delay_s,
-            retry_after_s=retry_after_sleep,
-        )
-        if sleep_s > 0:
-            time.sleep(sleep_s)
-
-    assert last_exc is not None
-    if last_was_timeout:
-        raise TimeoutError(
-            f"OpenRouter synthesis request timed out after {cfg.retry_attempts} attempt(s) "
-            f"(timeout_s={cfg.timeout_s})."
-        ) from last_exc
-    raise last_exc
 
 
 def _format_chunk_block(anchor: int, result: SearchResult) -> str:
@@ -462,8 +350,8 @@ def generate_synthesis(
     retried up to ``_SYNTHESIS_PARSE_MAX_ATTEMPTS`` times (same prompt) before raising.
 
     Logging:
-        DEBUG — full system prompt, full user prompt, raw assistant message before JSON parse.
-        INFO — cited N of M chunks, plus model id and wall latency (synthesis HTTP only).
+        DEBUG — synthesis and (when enabled) citation verifier: full prompts and raw model text before parse.
+        INFO — synthesis citation coverage (chunks), model id, synthesis latency_ms; verifier anchor keep/remove counts.
     """
     cfg = cfg or SynthesisConfig()
     key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
@@ -504,12 +392,13 @@ def generate_synthesis(
     answer_markdown = ""
     with httpx.Client(timeout=cfg.timeout_s) as client:
         for parse_attempt in range(_SYNTHESIS_PARSE_MAX_ATTEMPTS):
-            response = _post_openrouter_chat_completions(
+            response = post_openrouter_chat_completions(
                 client=client,
                 url=url,
                 headers=headers,
                 payload=payload,
                 cfg=cfg,
+                log_label="OpenRouter synthesis",
             )
             body = response.json()
             raw = body["choices"][0]["message"]["content"].strip()
@@ -534,6 +423,16 @@ def generate_synthesis(
             break
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
+    verifier_removed: list[int] = []
+    verifier_ms = 0
+    if cfg.verifier_enabled:
+        answer_markdown, verifier_removed, verifier_ms = verify_citations(
+            answer_markdown,
+            packed_context,
+            api_key=key,
+            cfg=cfg,
+        )
+
     sources = _extract_sources(answer_markdown, context_results)
     provided = len(context_results)
     cited = len(sources)
@@ -553,6 +452,8 @@ def generate_synthesis(
         completion_tokens=usage.get("completion_tokens"),
         total_tokens=usage.get("total_tokens"),
         chunks_provided=len(context_results),
+        verifier_removed_anchors=verifier_removed,
+        verifier_latency_ms=verifier_ms,
     )
 
     return SynthesisResponse(
