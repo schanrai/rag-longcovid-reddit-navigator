@@ -38,15 +38,26 @@ EVAL_QUERIES: list[str] = [
     "Finally recovered after 4 years - here are the treatments I tried",
 ]
 
-JUDGE_SYSTEM = """You are a strict evaluator for a Long COVID community RAG synthesis.
+JUDGE_SYSTEM = """You are a rigorous evaluator for a Long COVID community RAG synthesis.
 
 You receive the user's original query, the rewritten query, the model's answer markdown (with [n] citation anchors), and the exact source chunks shown to the synthesis model (<SOURCE_1> … </SOURCE_1>, etc.). You do NOT receive a separate intent label — infer what the query is asking (e.g. treatment vs emotional vs mixed) from the wording of the queries only.
 
 Your job:
-1. For EVERY [n] anchor appearing in the answer markdown, verify that the claim(s) in the same sentence or immediately preceding clause are directly supported by the text inside <SOURCE_n>. List EVERY mismatch and EVERY orphaned anchor (anchor with no defensible support in SOURCE_n). Do not sample anchors — check all of them.
-2. Score five criteria from 1 (poor) to 5 (excellent):
+
+1. instruction_adherence (for scoring): Does every factual claim come from the provided chunks only? Penalize outside knowledge or invention.
+
+2. citation_accuracy — use ONLY these rules when scoring citation_accuracy and when deciding whether something is a citation issue (do not apply conjunctive per-anchor semantics):
+   - Collective / distributive semantics: When multiple anchors appear together on the same sentence or clause (e.g. [1][14][15] at the end), evaluate them as a group. The cited sources taken together should cover the substantive claims in that sentence. Do NOT require each cited source, by itself, to support every clause or phrase in the sentence.
+   - Flag an individual [n] only if SOURCE_n has no relevant support for any substantive part of the claim that citation group is attached to — not because it omits a detail that another cited source in the same group covers.
+   - Example (equivalent on citation_accuracy): "Side effects include grogginess [1], cold hands and feet [14], and nightmares [15]" vs "Side effects include grogginess, cold hands and feet, and nightmares [1][14][15]" — same score when the three sources collectively cover those three effects. Do NOT flag [1] for not mentioning cold hands if [14] covers cold hands.
+   - Reasonable paraphrasing: If meaning is preserved, do NOT treat synonym substitution or normal synthesis language as citation inaccuracies — including e.g. "life-changing" vs "changed my life"; "heart palpitations" vs "fluttery rapid heart"; "disappeared entirely" vs "went away"; "manageable baseline" as synthesis when the source describes shorter or less severe crashes (or similar); light interpretive glue (e.g. "focus energy on moving forward") when it aligns with the source's idea.
+   - DO still flag citation_accuracy problems when: the meaning materially changes vs what sources support; a cited source contradicts the claim; a cited source has zero relevance to any part of the claim the group attaches to; or information is fabricated / absent from all provided sources.
+
+3. Examine every [n] in the answer; list issues only for real violations of instruction_adherence or of the citation_accuracy rules above — not for acceptable collective coverage or reasonable paraphrase.
+
+4. Score five criteria from 1 (poor) to 5 (excellent):
    - instruction_adherence: Does every factual claim come from the provided chunks only? Penalize outside knowledge or invention.
-   - citation_accuracy: Consistency of each [n] with SOURCE_n after your full anchor audit.
+   - citation_accuracy: Anchor usage judged only by the citation_accuracy rules in section 2 (collective coverage + paraphrase tolerance).
    - format_consistency: Bold topic headings, point paragraphs with citations at end of points — not bullet lists or rigid generic subsections unless clearly appropriate.
    - tone_intent: Is tone appropriate for what the queries ask and for patient-community context (e.g. clinical-neutral vs empathetic), judged from the query text alone — not from any external intent tag.
    - diversity: Multiple distinct angles when sources support them; incompatible community views called out when sources conflict.

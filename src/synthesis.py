@@ -97,10 +97,10 @@ class SynthesisConfig(BaseModel):
         description="Upper cap on sleep between retries and on Retry-After (seconds).",
     )
     verifier_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "Run post-synthesis citation audit (second LLM call) to strip [n] anchors "
-            "not explicitly supported by SOURCE_n; disable for A/B tests or cost control."
+            "When True, run post-synthesis citation audit (second LLM call) to strip [n] anchors "
+            "not explicitly supported by SOURCE_n. Default off for latency/cost; enable for stricter citation hygiene."
         ),
     )
     answer_word_target_min: int = Field(
@@ -351,7 +351,7 @@ def generate_synthesis(
 
     Logging:
         DEBUG — synthesis and (when enabled) citation verifier: full prompts and raw model text before parse.
-        INFO — synthesis citation coverage (chunks), model id, synthesis latency_ms; verifier anchor keep/remove counts.
+        INFO — synthesis citation coverage (chunks), model id, synthesis latency_ms, verifier_latency_ms; verifier anchor keep/remove counts.
     """
     cfg = cfg or SynthesisConfig()
     key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
@@ -437,11 +437,12 @@ def generate_synthesis(
     provided = len(context_results)
     cited = len(sources)
     log.info(
-        "synthesis citation coverage: cited %d of %d chunks (model=%s, latency_ms=%d)",
+        "synthesis citation coverage: cited %d of %d chunks (model=%s, latency_ms=%d, verifier_latency_ms=%d)",
         cited,
         provided,
         cfg.model,
         elapsed_ms,
+        verifier_ms,
     )
     usage = body.get("usage", {})
     metadata = ResponseMetadata(
