@@ -286,21 +286,48 @@ def _extract_answer_markdown_loose(cleaned: str) -> str | None:
     return text.strip() or None
 
 
+def _recover_plain_markdown_answer(cleaned: str) -> str | None:
+    """
+    When the model ignores the JSON envelope and returns markdown only (common with
+    some chat-tuned endpoints): accept the body if it looks like our synthesis.
+
+    Does not run when output looks like JSON (`{` first) — partial JSON is left to
+    `_extract_answer_markdown_loose` only.
+    """
+    t = cleaned.strip()
+    if not t or t.startswith("{"):
+        return None
+    if len(t) < 80:
+        return None
+    if not ANCHOR_PATTERN.search(t):
+        return None
+    if DISCLAIMER_TEXT not in t:
+        t = t.rstrip() + "\n\n" + DISCLAIMER_TEXT
+    return t
+
+
 def _parse_synthesis_payload(cleaned: str) -> dict[str, Any]:
     """Parse strict JSON, or fall back to loose extraction of answer_markdown."""
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
         loose = _extract_answer_markdown_loose(cleaned)
-        if loose is None:
-            raise ValueError(
-                f"Synthesis model returned non-JSON output: {cleaned[:300]}"
-            ) from exc
-        log.warning(
-            "synthesis JSON parse failed (%s); recovered answer_markdown via loose extractor",
-            exc,
-        )
-        return {"answer_markdown": loose}
+        if loose is not None:
+            log.warning(
+                "synthesis JSON parse failed (%s); recovered answer_markdown via loose extractor",
+                exc,
+            )
+            return {"answer_markdown": loose}
+        plain = _recover_plain_markdown_answer(cleaned)
+        if plain is not None:
+            log.warning(
+                "synthesis JSON parse failed (%s); recovered plain markdown answer (no JSON envelope)",
+                exc,
+            )
+            return {"answer_markdown": plain}
+        raise ValueError(
+            f"Synthesis model returned non-JSON output: {cleaned[:300]}"
+        ) from exc
 
 
 def _extract_sources(answer_markdown: str, results: list[SearchResult]) -> list[Source]:
