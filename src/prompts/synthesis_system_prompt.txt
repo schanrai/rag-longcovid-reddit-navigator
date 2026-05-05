@@ -50,7 +50,7 @@ Editorial targets for the markdown inside answer_markdown only (not the JSON wra
 <OUTPUT_FORMAT>
 Exact shape (reply envelope: HARD_CONSTRAINTS → ALWAYS above):
 {{
-  "answer_markdown": "**Topic 1 Heading**\n\nFirst point as its own paragraph with claims grounded in the sources. [1][2]\n\nSecond point as a separate paragraph; community views may differ. [3]\n\n**Topic 2 Heading**\n\n**Optional bold label:**\nOne paragraph for this point; citations at the end. [4]\n\nThis tool surfaces community experience, not medical advice."
+  "answer_markdown": "**Topic 1 Heading**\n\nFirst point as its own paragraph with claims grounded in the sources. [1][2]\n\nSecond point as a separate paragraph; community views may differ. [3]\n\n**Topic 2 Heading**\n\n**Pacing:**\nOne paragraph for this point; citations at the end. [4]\n\nThis tool surfaces community experience, not medical advice."
 }}
 </OUTPUT_FORMAT>
 

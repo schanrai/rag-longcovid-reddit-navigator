@@ -27,7 +27,7 @@ from src.synthesis import SynthesisResponse
 log = logging.getLogger(__name__)
 
 SYNTH_MODEL = "google/gemini-3-flash-preview"
-JUDGE_MODEL = "google/gemini-2.5-flash"
+JUDGE_MODEL = os.environ.get("EVAL_JUDGE_MODEL", "google/gemini-2.5-flash").strip() or "google/gemini-2.5-flash"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 EVAL_QUERIES: list[str] = [
