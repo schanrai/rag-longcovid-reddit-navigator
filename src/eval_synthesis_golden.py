@@ -11,6 +11,7 @@ Usage:
     cd projects/rag-longcovid-reddit-navigator
     python -m src.eval_synthesis_golden
     python -m src.eval_synthesis_golden --golden data/golden_queries.json
+    python -m src.eval_synthesis_golden --only q21-q28
 
 Writes: reports/synthesis_eval/golden_iteration_<N>.json (N auto-increments; separate from
 iteration_<N>.json from eval_synthesis.py).
@@ -46,6 +47,64 @@ from src.retrieval.pipeline import retrieve
 from src.synthesis import SynthesisConfig, generate_synthesis, pack_context
 
 log = logging.getLogger("eval_synthesis_golden")
+
+_RANGE_RE = re.compile(r"^q(\d+)-q(\d+)$", re.IGNORECASE)
+_SINGLE_RE = re.compile(r"^q(\d+)$", re.IGNORECASE)
+
+
+def _normalize_golden_id(num: int) -> str:
+    """Match typical golden_queries.json ids (q01, q02, …)."""
+    if 1 <= num <= 99:
+        return f"q{num:02d}"
+    return f"q{num}"
+
+
+def parse_only_filter(spec: str) -> set[str]:
+    """
+    Parse --only value: comma-separated ids and/or inclusive ranges.
+
+    Examples: ``q21-q28``, ``q01,q05-q08``, ``q3`` (normalized to ``q03``).
+    """
+    spec = spec.strip()
+    if not spec:
+        raise ValueError("--only must be non-empty when provided")
+    out: set[str] = set()
+    for raw_part in spec.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        m_range = _RANGE_RE.match(part)
+        if m_range:
+            lo = int(m_range.group(1))
+            hi = int(m_range.group(2))
+            a, b = min(lo, hi), max(lo, hi)
+            for n in range(a, b + 1):
+                out.add(_normalize_golden_id(n))
+            continue
+        m_single = _SINGLE_RE.match(part)
+        if m_single:
+            out.add(_normalize_golden_id(int(m_single.group(1))))
+            continue
+        raise ValueError(
+            f"Invalid --only fragment {part!r}; use qNN or qNN-qMM (comma-separated)."
+        )
+    if not out:
+        raise ValueError("--only produced no ids")
+    return out
+
+
+def filter_golden_rows(
+    rows: list[dict[str, Any]],
+    *,
+    only_ids: set[str] | None,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Preserve file order; return (filtered_rows, missing_requested_ids)."""
+    if only_ids is None:
+        return rows, set()
+    available = {r["id"] for r in rows}
+    missing = only_ids - available
+    filtered = [r for r in rows if r["id"] in only_ids]
+    return filtered, missing
 
 
 def next_golden_iteration_index(out_dir: Path) -> int:
@@ -84,7 +143,7 @@ def load_golden_query_rows(path: Path) -> tuple[list[dict[str, Any]], Any]:
     return rows, raw.get("version")
 
 
-def _run_golden_iteration(*, golden_path: Path) -> Path:
+def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     voyage_key = os.environ.get("VOYAGE_API_KEY", "").strip()
     if not api_key:
@@ -92,7 +151,27 @@ def _run_golden_iteration(*, golden_path: Path) -> Path:
     if not voyage_key:
         raise SystemExit("VOYAGE_API_KEY is not set")
 
-    golden_rows, golden_version = load_golden_query_rows(golden_path)
+    all_rows, golden_version = load_golden_query_rows(golden_path)
+    only_ids: set[str] | None = None
+    if only_spec is not None:
+        only_ids = parse_only_filter(only_spec)
+    golden_rows, missing_ids = filter_golden_rows(all_rows, only_ids=only_ids)
+    if missing_ids:
+        log.warning(
+            "Requested id(s) not found in golden file (skipped): %s",
+            ", ".join(sorted(missing_ids)),
+        )
+    if not golden_rows:
+        raise SystemExit(
+            "No queries match --only filter (check ids exist in golden_queries.json)."
+        )
+    if only_spec:
+        log.info(
+            "Subset run: %d query(s) after --only %r",
+            len(golden_rows),
+            only_spec,
+        )
+
     syn_base = SynthesisConfig(model=SYNTH_MODEL)
     retrieval_cfg = RetrievalConfig()
     retrieval_cfg.reranker.enabled = True
@@ -181,11 +260,12 @@ def _run_golden_iteration(*, golden_path: Path) -> Path:
         rel_golden = str(golden_path)
 
     report = {
-        "run_type": "golden_full",
+        "run_type": "golden_subset" if only_spec else "golden_full",
         "iteration": iteration,
         "timestamp": ts,
         "golden_queries_path": rel_golden,
         "golden_queries_version": golden_version,
+        "only_filter": only_spec,
         "query_count": n,
         "synthesis_model": SYNTH_MODEL,
         "judge_model": JUDGE_MODEL,
@@ -255,6 +335,16 @@ def main() -> None:
         default=default_golden,
         help=f"Path to golden_queries.json (default: {default_golden})",
     )
+    ap.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        metavar="SPEC",
+        help=(
+            "Run only these golden ids (comma-separated). Each token is qNN or inclusive "
+            "range qNN-qMM, e.g. q21-q28 or q01,q05-q08. Ids are normalized (q5 → q05)."
+        ),
+    )
     args = ap.parse_args()
     golden_path = args.golden.resolve()
     if not golden_path.is_file():
@@ -266,7 +356,7 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    _run_golden_iteration(golden_path=golden_path)
+    _run_golden_iteration(golden_path=golden_path, only_spec=args.only)
 
 
 if __name__ == "__main__":
