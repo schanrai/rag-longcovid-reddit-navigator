@@ -28,7 +28,8 @@ from src.citation_verifier import verify_citations
 from src.openrouter_retry import post_openrouter_chat_completions
 from src.retrieval.models import RetrievalResult, SearchResult
 
-load_dotenv()
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
 
 log = logging.getLogger(__name__)
 

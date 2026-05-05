@@ -25,6 +25,7 @@ import argparse
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Final
 
 from dotenv import load_dotenv
@@ -33,7 +34,7 @@ from .config import RetrievalConfig
 from .hybrid_search import TEST_QUERIES, search as hybrid_search
 from .models import SearchResult
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env", override=True)
 log = logging.getLogger("retrieval.reranker")
 
 DEFAULT_MODEL: Final[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2"

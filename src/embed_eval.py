@@ -34,7 +34,7 @@ import numpy as np
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 logging.basicConfig(
     level=logging.INFO,

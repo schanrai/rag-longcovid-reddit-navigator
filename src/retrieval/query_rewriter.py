@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 
 # Allow running as a module or directly
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent.parent / ".env", override=True)
 
 from src.retrieval.config import RetrievalConfig, RewriterConfig
 from src.retrieval.models import (

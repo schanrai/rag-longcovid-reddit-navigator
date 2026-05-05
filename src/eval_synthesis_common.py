@@ -18,7 +18,7 @@ import httpx
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -93,6 +93,38 @@ def _strip_json_fences(raw: str) -> str:
     return "\n".join(cleaned).strip()
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    """
+    When the judge returns prose + JSON or markdown fences slipped through,
+    pull the first top-level `{ ... }` block with string-aware brace matching.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+    return None
+
+
 def next_iteration_index(out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     best = 0
@@ -119,8 +151,35 @@ def query_label_short(q: str, max_len: int = 30) -> str:
 
 
 def parse_judge_json(raw: str) -> dict[str, Any]:
-    cleaned = _strip_json_fences(raw)
-    return json.loads(cleaned)
+    """
+    Judge must return a single JSON object. Models sometimes wrap it in fences
+    or add a short preamble; extract a balanced `{...}` if strict parse fails.
+    """
+    text = (raw or "").strip()
+    cleaned = _strip_json_fences(text)
+    candidates: list[str] = []
+    for chunk in (cleaned, text):
+        if not chunk:
+            continue
+        candidates.append(chunk)
+        inner = _extract_first_json_object(chunk)
+        if inner and inner not in candidates:
+            candidates.append(inner)
+    last_err: json.JSONDecodeError | None = None
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except json.JSONDecodeError as exc:
+            last_err = exc
+            continue
+    log.warning(
+        "judge JSON parse failed after %d candidate(s); raw prefix=%r",
+        len(candidates),
+        text[:500],
+    )
+    if last_err is not None:
+        raise last_err
+    raise json.JSONDecodeError("judge returned empty or non-JSON", text, 0)
 
 
 def judge_user_payload(
@@ -149,32 +208,61 @@ def call_judge(
         "Content-Type": "application/json",
         "HTTP-Referer": os.environ.get("APP_URL", "http://localhost:3000"),
     }
-    payload: dict[str, Any] = {
+    base_payload: dict[str, Any] = {
         "model": JUDGE_MODEL,
         "temperature": 0.0,
         "max_tokens": 4096,
-        "messages": [
+    }
+    reminder = (
+        "\n\nREMINDER: Your entire reply must be ONE valid JSON object only "
+        "(no markdown fences, no commentary before or after). "
+        "Keys: instruction_adherence, citation_accuracy, format_consistency, "
+        "tone_intent, diversity, issues, summary."
+    )
+
+    with httpx.Client(timeout=timeout_s) as client:
+
+        def post_judge_messages(messages: list[dict[str, str]]) -> str:
+            payload = {**base_payload, "messages": messages}
+            for attempt in range(2):
+                r = client.post(OPENROUTER_URL, headers=headers, json=payload)
+                if r.status_code == 429 and attempt == 0:
+                    ra = r.headers.get("Retry-After")
+                    try:
+                        sleep_s = float(ra) if ra is not None else 5.0
+                    except (TypeError, ValueError):
+                        sleep_s = 5.0
+                    log.warning("Judge 429; retrying after %.1fs", sleep_s)
+                    time.sleep(sleep_s)
+                    continue
+                r.raise_for_status()
+                body = r.json()
+                msg = body["choices"][0]["message"]
+                raw = (msg.get("content") or "").strip()
+                if not raw:
+                    log.warning(
+                        "judge returned empty content (finish_reason=%s)",
+                        body["choices"][0].get("finish_reason"),
+                    )
+                return raw
+            raise RuntimeError("judge: exhausted HTTP retries without return")
+
+        messages = [
             {"role": "system", "content": JUDGE_SYSTEM},
             {"role": "user", "content": user_content},
-        ],
-    }
-    with httpx.Client(timeout=timeout_s) as client:
-        for attempt in range(2):
-            r = client.post(OPENROUTER_URL, headers=headers, json=payload)
-            if r.status_code == 429 and attempt == 0:
-                ra = r.headers.get("Retry-After")
-                try:
-                    sleep_s = float(ra) if ra is not None else 5.0
-                except (TypeError, ValueError):
-                    sleep_s = 5.0
-                log.warning("Judge 429; retrying after %.1fs", sleep_s)
-                time.sleep(sleep_s)
-                continue
-            r.raise_for_status()
-            body = r.json()
-            raw = body["choices"][0]["message"]["content"].strip()
+        ]
+        raw = post_judge_messages(messages)
+        try:
             return parse_judge_json(raw)
-    raise RuntimeError("judge: exhausted retries without return")
+        except json.JSONDecodeError:
+            log.warning("judge JSON parse failed; retrying with stricter JSON reminder")
+            raw2 = post_judge_messages(
+                [
+                    {"role": "system", "content": JUDGE_SYSTEM},
+                    {"role": "user", "content": user_content + reminder},
+                ]
+            )
+            return parse_judge_json(raw2)
 
 
 def default_judge_result(exc: str) -> dict[str, Any]:

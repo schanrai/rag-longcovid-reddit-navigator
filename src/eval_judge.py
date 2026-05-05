@@ -31,7 +31,7 @@ import numpy as np
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 sys.path.insert(0, str(Path(__file__).parent))
 from embed_eval import compose_embedding_input

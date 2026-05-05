@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from chunk_data import post_content_exclusion
 from gate_analysis import stream_ndjson
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 logging.basicConfig(
     level=logging.INFO,

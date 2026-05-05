@@ -35,7 +35,8 @@ from src.retrieval.models import SearchResult
 from src.retrieval.ranking import rank
 from src.retrieval.reranker import rerank
 
-load_dotenv()
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
 log = logging.getLogger("ranking_qa")
 
 

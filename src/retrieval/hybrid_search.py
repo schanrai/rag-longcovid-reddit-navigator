@@ -26,6 +26,8 @@ from typing import Any, Final
 
 import httpx
 import weaviate
+from pathlib import Path
+
 from dotenv import load_dotenv
 from weaviate.classes.init import AdditionalConfig, Auth, Timeout
 from weaviate.classes.query import HybridFusion, MetadataQuery
@@ -33,7 +35,7 @@ from weaviate.classes.query import HybridFusion, MetadataQuery
 from .config import RetrievalConfig, SearchConfig
 from .models import ChunkMetadata, SearchResult
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env", override=True)
 log = logging.getLogger("retrieval.hybrid_search")
 
 COLLECTION_NAME: Final[str] = "LongCovidChunks"

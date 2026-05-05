@@ -20,13 +20,20 @@ Requires: OPENROUTER_API_KEY, VOYAGE_API_KEY, Weaviate env (same as pipeline_cli
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load project .env before any src imports (override=True: project keys win over shell).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
+
 import argparse
 import json
 import logging
 import os
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from src.eval_synthesis_common import (
