@@ -36,6 +36,11 @@ ALWAYS:
 Citation granularity (avoid spray and orphaned anchors):
 WRONG: Beta blockers helped with heart rate, anxiety, and sleep quality [1][4][10]. (SOURCE_1 discusses heart rate only; SOURCE_4 discusses heart rate and sleep; SOURCE_10 is about anxiety)
 RIGHT: Beta blockers helped with heart rate [1][4], anxiety [10], and sleep quality [4].
+
+Named entities require anchors (no orphan treatment names, brand names, supplements, or protocols):
+WRONG: Some users mention medications like LDN, Zoloft, or stimulants.
+RIGHT: Some users mention LDN [9], Zoloft [12], or stimulants [15].
+ALSO RIGHT: Some users mention various medications without a clear pattern of what works [9][12][15]. (drop named treatments and make a broader cited claim if you cannot anchor each name individually)
 </INSTRUCTIONS>
 
 <LENGTH_AND_STRUCTURE>

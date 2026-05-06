@@ -27,7 +27,12 @@ from src.synthesis import SynthesisResponse
 log = logging.getLogger(__name__)
 
 SYNTH_MODEL = "google/gemini-3-flash-preview"
-JUDGE_MODEL = os.environ.get("EVAL_JUDGE_MODEL", "google/gemini-2.5-flash").strip() or "google/gemini-2.5-flash"
+# Default judge for synthesis eval (eval_synthesis*, bakeoff): Claude Sonnet via OpenRouter.
+# Override with EVAL_JUDGE_MODEL.
+JUDGE_MODEL = (
+    os.environ.get("EVAL_JUDGE_MODEL", "anthropic/claude-sonnet-4.6").strip()
+    or "anthropic/claude-sonnet-4.6"
+)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 EVAL_QUERIES: list[str] = [
@@ -201,15 +206,18 @@ def call_judge(
     user_content: str,
     *,
     api_key: str,
+    model: str | None = None,
     timeout_s: float = 120.0,
 ) -> dict[str, Any]:
+    """Score synthesis output. ``model`` overrides ``JUDGE_MODEL`` (e.g. dual-judge calibration)."""
+    judge_model = (model or JUDGE_MODEL).strip() or JUDGE_MODEL
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": os.environ.get("APP_URL", "http://localhost:3000"),
     }
     base_payload: dict[str, Any] = {
-        "model": JUDGE_MODEL,
+        "model": judge_model,
         "temperature": 0.0,
         "max_tokens": 4096,
     }

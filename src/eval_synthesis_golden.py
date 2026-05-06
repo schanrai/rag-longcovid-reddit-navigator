@@ -16,6 +16,14 @@ Usage:
 Writes: reports/synthesis_eval/golden_iteration_<N>.json (N auto-increments; separate from
 iteration_<N>.json from eval_synthesis.py).
 
+Dual-judge calibration (same retrieval + synthesis; second LLM scores the same payload):
+
+    python -m src.eval_synthesis_golden --second-judge-model openai/gpt-5.4-mini
+
+Primary judge: ``EVAL_JUDGE_MODEL`` (default ``anthropic/claude-sonnet-4.6``).
+
+Compare two reports (e.g. baseline vs new run): ``python -m src.compare_golden_iterations --latest 2``.
+
 Requires: OPENROUTER_API_KEY, VOYAGE_API_KEY, Weaviate env (same as pipeline_cli).
 """
 from __future__ import annotations
@@ -150,7 +158,12 @@ def load_golden_query_rows(path: Path) -> tuple[list[dict[str, Any]], Any]:
     return rows, raw.get("version")
 
 
-def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
+def _run_golden_iteration(
+    *,
+    golden_path: Path,
+    only_spec: str | None,
+    second_judge_model: str | None,
+) -> Path:
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     voyage_key = os.environ.get("VOYAGE_API_KEY", "").strip()
     if not api_key:
@@ -190,6 +203,7 @@ def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
 
     queries_out: list[dict[str, Any]] = []
     score_matrix: list[list[float]] = []
+    score_matrix_b: list[list[float]] | None = [] if second_judge_model else None
 
     client = _build_weaviate_client()
     try:
@@ -229,24 +243,50 @@ def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
             score_matrix.append(row_scores)
 
             q_mean = round(sum(row_scores) / len(row_scores), 1) if row_scores else 0.0
-            queries_out.append(
-                {
-                    "golden_id": row["id"],
-                    "category": row["category"],
-                    "query": query,
-                    "rewritten_query": retrieval.query.best_rewrite.query,
-                    "answer_markdown": syn_resp.answer,
-                    "sources_cited": len(syn_resp.sources),
-                    "sources_provided": len(ctx_results),
-                    "synthesis": synthesis_telemetry(syn_resp),
-                    "scores": {
-                        **{k: scores[k] for k in AGG_KEYS},
-                        "mean": q_mean,
-                    },
-                    "issues": scores["issues"],
-                    "summary": scores["summary"],
+            q_payload: dict[str, Any] = {
+                "golden_id": row["id"],
+                "category": row["category"],
+                "query": query,
+                "rewritten_query": retrieval.query.best_rewrite.query,
+                "answer_markdown": syn_resp.answer,
+                "sources_cited": len(syn_resp.sources),
+                "sources_provided": len(ctx_results),
+                "synthesis": synthesis_telemetry(syn_resp),
+                "scores": {
+                    **{k: scores[k] for k in AGG_KEYS},
+                    "mean": q_mean,
+                },
+                "issues": scores["issues"],
+                "summary": scores["summary"],
+            }
+
+            if second_judge_model:
+                assert score_matrix_b is not None
+                try:
+                    raw_b = call_judge(
+                        judge_user,
+                        api_key=api_key,
+                        model=second_judge_model,
+                    )
+                    scores_b = normalize_scores(raw_b)
+                except Exception as exc:
+                    log.exception(
+                        "Secondary judge failed for golden_id=%s model=%s",
+                        row["id"],
+                        second_judge_model,
+                    )
+                    scores_b = default_judge_result(str(exc))
+                row_b = [float(scores_b[k]) for k in AGG_KEYS]
+                score_matrix_b.append(row_b)
+                qb_mean = round(sum(row_b) / len(row_b), 1) if row_b else 0.0
+                q_payload["scores_secondary"] = {
+                    **{k: scores_b[k] for k in AGG_KEYS},
+                    "mean": qb_mean,
                 }
-            )
+                q_payload["issues_secondary"] = scores_b["issues"]
+                q_payload["summary_secondary"] = scores_b["summary"]
+
+            queries_out.append(q_payload)
     finally:
         client.close()
 
@@ -260,6 +300,24 @@ def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
         aggregate[key] = round(sum(col) / len(col), 1)
     crit_means = [aggregate[k] for k in AGG_KEYS]
     aggregate["mean"] = round(sum(crit_means) / len(crit_means), 1) if crit_means else 0.0
+
+    aggregate_secondary: dict[str, Any] | None = None
+    aggregate_delta: dict[str, Any] | None = None
+    if second_judge_model and score_matrix_b is not None and len(score_matrix_b) == n:
+        aggregate_secondary = {}
+        for j, key in enumerate(AGG_KEYS):
+            col_b = [score_matrix_b[i][j] for i in range(n)]
+            aggregate_secondary[key] = round(sum(col_b) / len(col_b), 1)
+        crit_b = [aggregate_secondary[k] for k in AGG_KEYS]
+        aggregate_secondary["mean"] = (
+            round(sum(crit_b) / len(crit_b), 1) if crit_b else 0.0
+        )
+        aggregate_delta = {
+            key: round(aggregate_secondary[key] - aggregate[key], 2) for key in AGG_KEYS
+        }
+        aggregate_delta["mean"] = round(
+            aggregate_secondary["mean"] - aggregate["mean"], 2
+        )
 
     try:
         rel_golden = str(golden_path.relative_to(PROJECT_ROOT))
@@ -276,7 +334,10 @@ def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
         "query_count": n,
         "synthesis_model": SYNTH_MODEL,
         "judge_model": JUDGE_MODEL,
+        "judge_model_secondary": second_judge_model,
         "aggregate": aggregate,
+        "aggregate_secondary": aggregate_secondary,
+        "aggregate_delta_secondary_minus_primary": aggregate_delta,
         "queries": queries_out,
     }
 
@@ -284,7 +345,18 @@ def _run_golden_iteration(*, golden_path: Path, only_spec: str | None) -> Path:
     out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info("Wrote %s", out_path)
 
-    _print_stdout(iteration, ts, golden_rows, score_matrix, aggregate, out_path)
+    _print_stdout(
+        iteration,
+        ts,
+        golden_rows,
+        score_matrix,
+        aggregate,
+        out_path,
+        score_matrix_secondary=score_matrix_b,
+        aggregate_secondary=aggregate_secondary,
+        aggregate_delta=aggregate_delta,
+        judge_secondary_label=second_judge_model,
+    )
     return out_path
 
 
@@ -295,10 +367,19 @@ def _print_stdout(
     score_matrix: list[list[float]],
     aggregate: dict[str, Any],
     out_path: Path,
+    *,
+    score_matrix_secondary: list[list[float]] | None = None,
+    aggregate_secondary: dict[str, Any] | None = None,
+    aggregate_delta: dict[str, Any] | None = None,
+    judge_secondary_label: str | None = None,
 ) -> None:
     col_w = 28
     print()
-    print(f"Golden iteration {iteration} — {ts[:10]} ({len(golden_rows)} queries)")
+    dual = score_matrix_secondary is not None and judge_secondary_label
+    title_extra = f" | dual judge (+ {judge_secondary_label})" if dual else ""
+    print(
+        f"Golden iteration {iteration} — {ts[:10]} ({len(golden_rows)} queries){title_extra}"
+    )
     print(
         f"{'ID / Query':<{col_w}}  {'Adhere':>6}  {'Cite':>6}  {'Format':>6}  "
         f"{'Tone':>6}  {'Divers':>6}  {'Mean':>6}"
@@ -321,12 +402,56 @@ def _print_stdout(
                 f"{'fail':>6}  {'fail':>6}  {'—':>6}"
             )
 
-    mean_label = "MEAN (across queries)"
+    mean_label = f"MEAN primary ({JUDGE_MODEL.split('/')[-1][:18]})"
     print(
         f"{mean_label:<{col_w}}  {aggregate['instruction_adherence']:>6}  "
         f"{aggregate['citation_accuracy']:>6}  {aggregate['format_consistency']:>6}  "
         f"{aggregate['tone_intent']:>6}  {aggregate['diversity']:>6}  {aggregate['mean']:>6}"
     )
+
+    if dual and score_matrix_secondary and aggregate_secondary:
+        short_b = (judge_secondary_label or "").split("/")[-1][:18]
+        print()
+        print(f"Secondary judge ({short_b}) — same answers & sources")
+        print(
+            f"{'ID / Query':<{col_w}}  {'Adhere':>6}  {'Cite':>6}  {'Format':>6}  "
+            f"{'Tone':>6}  {'Divers':>6}  {'Mean':>6}"
+        )
+        for row, scores_row in zip(golden_rows, score_matrix_secondary):
+            gid = row["id"] or "?"
+            label = query_label_short(row["query"], max_len=max(8, col_w - len(gid) - 2))
+            label = f"{gid} {label}"
+            if len(label) > col_w:
+                label = label[: col_w - 1] + "…"
+            if any(x > 0 for x in scores_row):
+                qm = round(sum(scores_row) / len(scores_row), 1)
+                print(
+                    f"{label:<{col_w}}  {int(scores_row[0]):>6}  {int(scores_row[1]):>6}  "
+                    f"{int(scores_row[2]):>6}  {int(scores_row[3]):>6}  {int(scores_row[4]):>6}  {qm:>6}"
+                )
+            else:
+                print(
+                    f"{label:<{col_w}}  {'fail':>6}  {'fail':>6}  {'fail':>6}  "
+                    f"{'fail':>6}  {'fail':>6}  {'—':>6}"
+                )
+        mean_label_b = f"MEAN secondary ({short_b})"
+        print(
+            f"{mean_label_b:<{col_w}}  {aggregate_secondary['instruction_adherence']:>6}  "
+            f"{aggregate_secondary['citation_accuracy']:>6}  {aggregate_secondary['format_consistency']:>6}  "
+            f"{aggregate_secondary['tone_intent']:>6}  {aggregate_secondary['diversity']:>6}  "
+            f"{aggregate_secondary['mean']:>6}"
+        )
+
+    if aggregate_delta:
+        print()
+        print("Δ (secondary − primary) aggregate:")
+        print(
+            f"{'':<{col_w}}  {aggregate_delta['instruction_adherence']:>6}  "
+            f"{aggregate_delta['citation_accuracy']:>6}  {aggregate_delta['format_consistency']:>6}  "
+            f"{aggregate_delta['tone_intent']:>6}  {aggregate_delta['diversity']:>6}  "
+            f"{aggregate_delta['mean']:>6}"
+        )
+
     print(f"\nFull report: {out_path}")
 
 
@@ -352,6 +477,17 @@ def main() -> None:
             "range qNN-qMM, e.g. q21-q28 or q01,q05-q08. Ids are normalized (q5 → q05)."
         ),
     )
+    ap.add_argument(
+        "--second-judge-model",
+        type=str,
+        default=None,
+        metavar="OPENROUTER_MODEL",
+        help=(
+            "Optional second judge (OpenRouter id). Same rubric and user payload as primary; "
+            "written to scores_secondary and aggregate_secondary for calibration. "
+            "If omitted, uses EVAL_JUDGE_MODEL_SECOND when set."
+        ),
+    )
     args = ap.parse_args()
     golden_path = args.golden.resolve()
     if not golden_path.is_file():
@@ -363,7 +499,16 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    _run_golden_iteration(golden_path=golden_path, only_spec=args.only)
+    sj = (
+        (args.second_judge_model or "").strip()
+        or os.environ.get("EVAL_JUDGE_MODEL_SECOND", "").strip()
+        or None
+    )
+    _run_golden_iteration(
+        golden_path=golden_path,
+        only_spec=args.only,
+        second_judge_model=sj,
+    )
 
 
 if __name__ == "__main__":
