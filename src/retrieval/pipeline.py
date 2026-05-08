@@ -18,12 +18,74 @@ import weaviate
 
 from .config import RetrievalConfig
 from .hybrid_search import search as hybrid_search
-from .models import RankingPreset, RetrievalResult
+from .models import RankingPreset, RetrievalResult, RewriteResult
 from .query_rewriter import rewrite
 from .ranking import rank
 from .reranker import rerank
 
 log = logging.getLogger("retrieval.pipeline")
+
+
+def retrieve_from_rewrite(
+    rewrite_result: RewriteResult,
+    *,
+    search_query: str | None = None,
+    cfg: RetrievalConfig | None = None,
+    preset: RankingPreset = RankingPreset.MOST_RELEVANT,
+    voyage_api_key: str | None = None,
+    weaviate_client: weaviate.WeaviateClient | None = None,
+) -> RetrievalResult:
+    """
+    Run hybrid search → rerank → rank using a finalized ``RewriteResult``.
+
+    Use when the rewriter has already run (or after the user resolves
+    clarification) so retrieval uses an explicit search string while
+    ``rewrite_result`` is still passed to synthesis prompts.
+
+    Parameters
+    ----------
+    rewrite_result:
+        Rewrite output to attach to ``RetrievalResult.query``.
+    search_query:
+        Text for embedding + BM25 + reranker. Defaults to
+        ``rewrite_result.best_rewrite.query``.
+    cfg:
+        ``RetrievalConfig`` for search / rerank / rank.
+    preset:
+        Carried on ``RetrievalResult`` for analytics.
+    voyage_api_key:
+        Passed to hybrid search; falls back to ``VOYAGE_API_KEY``.
+    weaviate_client:
+        Optional long-lived Weaviate client (recommended for FastAPI).
+    """
+    cfg = cfg or RetrievalConfig()
+    qtext = (search_query if search_query is not None else rewrite_result.best_rewrite.query).strip()
+    t0 = time.perf_counter()
+
+    hybrid_results = hybrid_search(
+        qtext,
+        cfg=cfg,
+        voyage_api_key=voyage_api_key,
+        weaviate_client=weaviate_client,
+    )
+    reranked = rerank(qtext, hybrid_results, cfg=cfg)
+    ranked = rank(reranked, cfg=cfg.ranking)
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "retrieve_from_rewrite() done in %.0fms — %d chunks (reranker=%s)",
+        elapsed_ms,
+        len(ranked),
+        cfg.reranker.enabled,
+    )
+
+    return RetrievalResult(
+        query=rewrite_result,
+        results=ranked,
+        preset=preset,
+        reranker_enabled=cfg.reranker.enabled,
+        elapsed_ms=elapsed_ms,
+    )
 
 
 def retrieve(
@@ -63,32 +125,12 @@ def retrieve(
         ``query`` is the ``RewriteResult``; ``results`` are ranked chunks.
     """
     cfg = cfg or RetrievalConfig()
-    t0 = time.perf_counter()
-
     rewrite_result = rewrite(user_query, cfg=cfg, api_key=openrouter_api_key)
-    query_for_retrieval = rewrite_result.best_rewrite.query
-
-    hybrid_results = hybrid_search(
-        query_for_retrieval,
+    return retrieve_from_rewrite(
+        rewrite_result,
+        search_query=rewrite_result.best_rewrite.query,
         cfg=cfg,
+        preset=preset,
         voyage_api_key=voyage_api_key,
         weaviate_client=weaviate_client,
-    )
-    reranked = rerank(query_for_retrieval, hybrid_results, cfg=cfg)
-    ranked = rank(reranked, cfg=cfg.ranking)
-
-    elapsed_ms = (time.perf_counter() - t0) * 1000
-    log.info(
-        "retrieve() done in %.0fms — %d chunks (reranker=%s)",
-        elapsed_ms,
-        len(ranked),
-        cfg.reranker.enabled,
-    )
-
-    return RetrievalResult(
-        query=rewrite_result,
-        results=ranked,
-        preset=preset,
-        reranker_enabled=cfg.reranker.enabled,
-        elapsed_ms=elapsed_ms,
     )

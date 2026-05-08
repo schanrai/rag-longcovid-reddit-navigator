@@ -12,9 +12,9 @@ Modules:
 """
 from .config import RetrievalConfig
 from .hybrid_search import dedup_results, search
-from .pipeline import retrieve
+from .pipeline import retrieve, retrieve_from_rewrite
 from .ranking import rank
-from .reranker import rerank
+from .reranker import rerank, warmup_cross_encoder
 from .models import (
     ChunkMetadata,
     IntentCategory,
@@ -28,9 +28,11 @@ from .models import (
 __all__ = [
     "RetrievalConfig",
     "retrieve",
+    "retrieve_from_rewrite",
     "search",
     "dedup_results",
     "rerank",
+    "warmup_cross_encoder",
     "rank",
     "ChunkMetadata",
     "IntentCategory",

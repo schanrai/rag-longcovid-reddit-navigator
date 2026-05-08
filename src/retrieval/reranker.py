@@ -55,6 +55,20 @@ def _load_model(model_name: str) -> object:
     return _model_cache[model_name]
 
 
+def warmup_cross_encoder(cfg: RetrievalConfig | None = None) -> None:
+    """
+    Load the cross-encoder once (FastAPI lifespan / readiness).
+
+    No-op when ``cfg.reranker.enabled`` is False.
+    """
+    cfg = cfg or RetrievalConfig()
+    if not cfg.reranker.enabled:
+        log.info("warmup_cross_encoder: reranker disabled — skipping model load")
+        return
+    _load_model(DEFAULT_MODEL)
+    log.info("warmup_cross_encoder: cross-encoder ready (%s)", DEFAULT_MODEL)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _compose_rerank_text(r: SearchResult) -> str:
