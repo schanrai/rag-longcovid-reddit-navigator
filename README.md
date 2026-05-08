@@ -117,6 +117,8 @@ curl -sS -i http://127.0.0.1:8000/query -H "Content-Type: application/json" \
 
 Automated Phase 1 checks (offline mocks): `.venv/bin/python -m pytest tests/test_phase1_query.py tests/test_api_query_validation.py tests/test_api_query_contract.py -v`
 
+Phase 1.5 (policy strip + citations helpers): `.venv/bin/python -m pytest tests/test_policy_block.py tests/test_citations.py tests/test_phase15_golden_policy_snippets.py tests/test_phase15_order_of_ops.py -v`
+
 ## Data source
 
 Arctic Shift dump of r/LongCovid — posts and comments exported as NDJSON.

@@ -44,3 +44,16 @@ def test_q23_style_beta_blocker_snippet() -> None:
     policy, cleaned = extract_policy_block(raw)
     assert policy.markdown
     assert cleaned.startswith("**Beta blockers")
+
+
+def test_intro_with_citations_not_policy_strip() -> None:
+    """Model sometimes cites before first **Topic**; policy blocks never use [n]."""
+    raw = (
+        "Community members report overlapping themes [15][20].\n\n"
+        "**Supplements and medications**\n\nNAC is discussed [1]."
+    )
+    policy, cleaned = extract_policy_block(raw)
+    assert policy.markdown == ""
+    assert policy.type is None
+    assert "[15]" in cleaned
+    assert "**Supplements and medications**" in cleaned

@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 
 # First **Topic Heading** line — same structural signal as synthesis_system_prompt.txt
 _TOPIC_HEADING_LINE: Final[re.Pattern[str]] = re.compile(r"^\*\*.+\*\*\s*$")
+# Policy/safety blocks must not use [n] anchors; prefix text with anchors is synthesis intro.
+_PREFIX_HAS_CITATION: Final[re.Pattern[str]] = re.compile(r"\[\d+\]")
 
 PolicyBlockType = Literal["emergency", "prescriber"] | None
 
@@ -29,7 +31,7 @@ class PolicyBlockPayload(BaseModel):
 _EMERGENCY_HINTS: Final[tuple[str, ...]] = (
     "emergency",
     "911",
-    "er ",
+    "emergency room",
     "urgent",
     "crushing chest",
     "chest pain",
@@ -92,10 +94,23 @@ def extract_policy_block(raw_answer_markdown: str) -> tuple[PolicyBlockPayload, 
 
     When a non-empty prefix exists before the first topic heading, it becomes
     ``policy_block.markdown`` and is stripped from the answer tab markdown.
+
+    If that prefix contains ``[n]`` citation anchors, treat it as synthesis (model
+    wrote cited intro before the first topic heading); return the full raw string
+    as the answer body and an empty policy block so citation parsing stays correct.
     """
+    text = (raw_answer_markdown or "").strip()
     prefix, body = split_policy_prefix(raw_answer_markdown)
     if not prefix:
         return PolicyBlockPayload(type=None, markdown=""), body
+
+    if _PREFIX_HAS_CITATION.search(prefix):
+        log.debug(
+            "policy_block: prefix before first **Topic** contains [n]; "
+            "skipping policy strip (prefix_len=%d)",
+            len(prefix),
+        )
+        return PolicyBlockPayload(type=None, markdown=""), text
 
     ptype = classify_policy_prefix(prefix)
     if ptype is None:

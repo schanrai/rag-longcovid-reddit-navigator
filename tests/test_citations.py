@@ -34,3 +34,11 @@ def test_sources_sorted_by_n() -> None:
     chunks = [_chunk(1), _chunk(2), _chunk(3)]
     sources, _ = build_cited_sources("Second [2] first [1].", chunks)
     assert [s.n for s in sources] == [1, 2]
+
+
+def test_non_cited_chunk_not_in_sources() -> None:
+    chunks = [_chunk(1, "one"), _chunk(2, "two"), _chunk(3, "three")]
+    sources, _ = build_cited_sources("Only [1] and [3].", chunks)
+    assert [s.n for s in sources] == [1, 3]
+    assert {s.text for s in sources} == {"one", "three"}
+    assert all(s.n != 2 for s in sources)
