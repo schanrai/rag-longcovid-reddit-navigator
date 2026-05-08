@@ -55,6 +55,7 @@ def post_query(
             cfg=cfg,
             synth_cfg=synth_cfg,
             weaviate_client=weaviate_client,
+            request_id=request_id,
         )
         if isinstance(result, ClarificationResponse):
             log.info("query clarification request_id=%s", request_id)

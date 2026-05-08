@@ -1,0 +1,8 @@
+# Config-as-code for Railway. Overrides dashboard start/healthcheck when present.
+# Reference: https://docs.railway.com/config-as-code/reference
+
+[deploy]
+startCommand = "python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+# Lifespan connects to Weaviate Cloud and warms the cross-encoder; cold starts can be slow.
+healthcheckTimeout = 300

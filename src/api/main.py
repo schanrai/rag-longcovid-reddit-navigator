@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.dependencies import APISettings
+from src.api.pipeline_env import validate_live_pipeline_env
 from src.api.routes import router
 from src.retrieval.config import RetrievalConfig
 from src.retrieval.hybrid_search import _build_weaviate_client
@@ -40,8 +42,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     connect = getattr(app.state, "_connect_weaviate", True)
     do_warmup = getattr(app.state, "_warmup_reranker", True)
     if connect:
+        validate_live_pipeline_env()
         log.info("Connecting Weaviate (service=%s)", settings.service_name)
+        t_wv = time.perf_counter()
         app.state.weaviate_client = _build_weaviate_client()
+        log.info(
+            "lifespan weaviate_client_ready_ms=%d service=%s",
+            int((time.perf_counter() - t_wv) * 1000),
+            settings.service_name,
+        )
     else:
         log.warning("Skipping Weaviate connect (test / offline mode)")
         app.state.weaviate_client = None
@@ -49,7 +58,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rcfg = RetrievalConfig()
     rcfg.reranker.enabled = True
     if do_warmup:
+        t_rm = time.perf_counter()
         warmup_cross_encoder(rcfg)
+        log.info(
+            "lifespan reranker_warmup_ms=%d service=%s",
+            int((time.perf_counter() - t_rm) * 1000),
+            settings.service_name,
+        )
 
     yield
 

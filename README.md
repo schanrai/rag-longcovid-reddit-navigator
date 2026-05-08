@@ -102,6 +102,8 @@ python3 src/build_eval_corpus.py
 
 Requires `.env` with `OPENROUTER_API_KEY`, `VOYAGE_API_KEY`, `WEAVIATE_URL`, and `WEAVIATE_API_KEY` for live `/query`.
 
+**Railway:** `railway.toml` and `Procfile` in the repo root set the web process (`python -m uvicorn … --host 0.0.0.0 --port $PORT`) and `/health` check timeout. **Phase 3 QA gate:** automated `pytest tests/test_phase3_production_readiness.py -v`; manual checklist `docs/deploy-smoke-phase3.md`.
+
 ```bash
 # Run API (reload optional)
 .venv/bin/uvicorn src.api.main:app --host 127.0.0.1 --port 8000
@@ -118,6 +120,10 @@ curl -sS -i http://127.0.0.1:8000/query -H "Content-Type: application/json" \
 Automated Phase 1 checks (offline mocks): `.venv/bin/python -m pytest tests/test_phase1_query.py tests/test_api_query_validation.py tests/test_api_query_contract.py -v`
 
 Phase 1.5 (policy strip + citations helpers): `.venv/bin/python -m pytest tests/test_policy_block.py tests/test_citations.py tests/test_phase15_golden_policy_snippets.py tests/test_phase15_order_of_ops.py -v`
+
+Phase 2 (FastAPI clarification mode + resolution + `edited_query_empty` / `invalid_rewrite_index`): `.venv/bin/python -m pytest tests/test_phase2_clarification.py tests/test_service_resolution.py -v`
+
+Phase 3 (production readiness — env gate, log shape, metadata): `.venv/bin/python -m pytest tests/test_phase3_production_readiness.py -v` — see `docs/deploy-smoke-phase3.md` for manual Railway / Weaviate checks.
 
 ## Data source
 

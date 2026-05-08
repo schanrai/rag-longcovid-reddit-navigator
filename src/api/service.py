@@ -81,10 +81,22 @@ def execute_query(
     cfg: RetrievalConfig,
     synth_cfg: SynthesisConfig,
     weaviate_client: weaviate.WeaviateClient,
+    request_id: str | None = None,
 ) -> ResponseUnion:
     """
     Full POST /query handling (sync). Raises ``ApiError`` for error envelopes.
+
+    ``request_id`` is logged on structured ``query_stages`` lines for log aggregation.
     """
+    rid = request_id or "-"
+    if body.edited_query is not None and not body.edited_query.strip():
+        raise ApiError(
+            400,
+            code="edited_query_empty",
+            message="Please enter a rephrased question before searching.",
+            failed_stage=None,
+        )
+
     gate_text = _text_for_input_gate(body)
     gate = validate_query_text(gate_text)
     if not gate.ok:
@@ -127,6 +139,13 @@ def execute_query(
     rewrite_ms = int((time.perf_counter() - t_rewrite0) * 1000)
 
     if rewrite_result.mode == RewriteMode.CLARIFICATION:
+        log.info(
+            "query_stages request_id=%s rewrite_ms=%d retrieval_ms=- synthesis_ms=- "
+            "total_ms=%d outcome=clarification",
+            rid,
+            rewrite_ms,
+            rewrite_ms,
+        )
         return ClarificationResponse(
             mode="clarification",
             intent=rewrite_result.intent.value,
@@ -183,6 +202,15 @@ def execute_query(
     retrieval_ms = int((time.perf_counter() - t_retrieve0) * 1000)
 
     if not retrieval.results:
+        total_empty = rewrite_ms + retrieval_ms
+        log.info(
+            "query_stages request_id=%s rewrite_ms=%d retrieval_ms=%d synthesis_ms=0 "
+            "total_ms=%d chunks_retrieved=0 chunks_cited=0 outcome=empty_retrieval",
+            rid,
+            rewrite_ms,
+            retrieval_ms,
+            total_empty,
+        )
         return QuerySuccessResponse(
             policy_block=PolicyBlockPayload(type=None, markdown=""),
             answer_markdown="",
@@ -190,7 +218,7 @@ def execute_query(
             rewritten_query=rewrite_result.best_rewrite.query,
             original_query=rewrite_result.original_query,
             metadata=QueryMetadata(
-                latency_ms=rewrite_ms + retrieval_ms,
+                latency_ms=total_empty,
                 chunks_retrieved=0,
                 chunks_cited=0,
                 reranker_used=cfg.reranker.enabled,
@@ -228,6 +256,17 @@ def execute_query(
     cited_sources, _orphans = build_cited_sources(cleaned_answer, context_chunks)
 
     total_ms = rewrite_ms + retrieval_ms + synth_ms
+    log.info(
+        "query_stages request_id=%s rewrite_ms=%d retrieval_ms=%d synthesis_ms=%d "
+        "total_ms=%d chunks_retrieved=%d chunks_cited=%d outcome=success",
+        rid,
+        rewrite_ms,
+        retrieval_ms,
+        synth_ms,
+        total_ms,
+        len(retrieval.results),
+        len(cited_sources),
+    )
     return QuerySuccessResponse(
         policy_block=policy_block,
         answer_markdown=cleaned_answer,
