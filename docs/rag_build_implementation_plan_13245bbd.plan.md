@@ -1,0 +1,1 @@
+/Users/sushichan/.cursor/plans/rag_build_implementation_plan_13245bbd.plan.md
