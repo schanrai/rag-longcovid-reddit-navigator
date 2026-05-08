@@ -98,6 +98,25 @@ python3 src/suggest_eval_chunks.py
 python3 src/build_eval_corpus.py
 ```
 
+## FastAPI (Phase 6 — baseline `/health` + `POST /query`)
+
+Requires `.env` with `OPENROUTER_API_KEY`, `VOYAGE_API_KEY`, `WEAVIATE_URL`, and `WEAVIATE_API_KEY` for live `/query`.
+
+```bash
+# Run API (reload optional)
+.venv/bin/uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+```
+
+**Phase 1 manual smoke**
+
+```bash
+curl -sS -i http://127.0.0.1:8000/health
+curl -sS -i http://127.0.0.1:8000/query -H "Content-Type: application/json" \
+  -d '{"query":"What helps brain fog for Long COVID?"}'
+```
+
+Automated Phase 1 checks (offline mocks): `.venv/bin/python -m pytest tests/test_phase1_query.py tests/test_api_query_validation.py tests/test_api_query_contract.py -v`
+
 ## Data source
 
 Arctic Shift dump of r/LongCovid — posts and comments exported as NDJSON.
