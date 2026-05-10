@@ -26,6 +26,7 @@ def _success_payload() -> QuerySuccessResponse:
             CitedSource(
                 n=1,
                 text="chunk",
+                post_title="Example thread title",
                 chunk_type="comment",
                 comment_score=2,
                 post_score=None,
@@ -72,6 +73,7 @@ def test_query_success_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     assert data["policy_block"]["type"] is None
     assert data["policy_block"]["markdown"] == ""
     assert data["sources"][0]["n"] == 1
+    assert data["sources"][0]["post_title"] == "Example thread title"
     assert data["metadata"]["chunks_cited"] == 1
 
 

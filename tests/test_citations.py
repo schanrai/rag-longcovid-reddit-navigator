@@ -5,13 +5,14 @@ from src.api.citations import build_cited_sources, ordered_citation_indices
 from src.retrieval.models import ChunkMetadata, SearchResult
 
 
-def _chunk(i: int, text: str = "body") -> SearchResult:
+def _chunk(i: int, text: str = "body", *, post_title: str = "") -> SearchResult:
     return SearchResult(
         chunk_id=f"id{i}",
         text=text,
         metadata=ChunkMetadata(
             chunk_id=f"id{i}",
             chunk_type="comment",
+            post_title=post_title,
             permalink=f"/p{i}",
             created_utc=1700000000 + i,
             comment_score=i,
@@ -42,3 +43,10 @@ def test_non_cited_chunk_not_in_sources() -> None:
     assert [s.n for s in sources] == [1, 3]
     assert {s.text for s in sources} == {"one", "three"}
     assert all(s.n != 2 for s in sources)
+
+
+def test_post_title_passed_through() -> None:
+    chunks = [_chunk(1, "body", post_title="  My thread  ")]
+    sources, _ = build_cited_sources("Ref [1].", chunks)
+    assert len(sources) == 1
+    assert sources[0].post_title == "My thread"

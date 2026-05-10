@@ -22,6 +22,10 @@ class CitedSource(BaseModel):
 
     n: int = Field(..., ge=1, description="Citation anchor index")
     text: str
+    post_title: str = Field(
+        default="",
+        description="Parent post title from chunk metadata (Weaviate post_title)",
+    )
     chunk_type: str
     comment_score: int | None = None
     post_score: int | None = None
@@ -77,6 +81,7 @@ def build_cited_sources(
             CitedSource(
                 n=n,
                 text=r.text or "",
+                post_title=(m.post_title or "").strip(),
                 chunk_type=m.chunk_type or "",
                 comment_score=m.comment_score,
                 post_score=m.post_score,
