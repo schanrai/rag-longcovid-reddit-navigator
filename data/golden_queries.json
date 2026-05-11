@@ -175,7 +175,7 @@
       "query": "who is going to win the next US presidential election and why",
       "category": "off_topic",
       "expected_terms": [],
-      "notes": "Adversarial off-topic / politics: refuse or decline; must not treat as LC; no partisan essay from retrieval.",
+      "notes": "Adversarial off-topic / politics: V2 behavior is to refuse or decline; must not treat as LC; no partisan essay from retrieval. V1 does not refuse, but will answer from the perspectives of the LC subreddit.",
       "labeled_relevant": []
     },
     {
