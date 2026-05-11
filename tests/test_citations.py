@@ -50,3 +50,36 @@ def test_post_title_passed_through() -> None:
     sources, _ = build_cited_sources("Ref [1].", chunks)
     assert len(sources) == 1
     assert sources[0].post_title == "My thread"
+
+
+def test_comment_empty_permalink_derived_from_link_id() -> None:
+    r = SearchResult(
+        chunk_id="t1_xyz_0",
+        text="c",
+        metadata=ChunkMetadata(
+            chunk_id="t1_xyz_0",
+            chunk_type="comment",
+            post_title="T",
+            permalink="",
+            link_id="t3_abc123",
+            created_utc=1700000000,
+        ),
+    )
+    sources, _ = build_cited_sources("See [1].", [r])
+    assert sources[0].permalink == "/r/LongCovid/comments/abc123/"
+
+
+def test_post_empty_permalink_derived_from_chunk_id() -> None:
+    r = SearchResult(
+        chunk_id="t3_abc123_0",
+        text="p",
+        metadata=ChunkMetadata(
+            chunk_id="t3_abc123_0",
+            chunk_type="post",
+            post_title="T",
+            permalink="",
+            created_utc=1700000000,
+        ),
+    )
+    sources, _ = build_cited_sources("See [1].", [r])
+    assert sources[0].permalink == "/r/LongCovid/comments/abc123/"

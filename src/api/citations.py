@@ -16,6 +16,48 @@ log = logging.getLogger(__name__)
 
 _ANCHOR: Final[re.Pattern[str]] = re.compile(r"\[(\d+)\]")
 
+# v1 corpus is single-subreddit; comment chunks omit permalink at ingest (chunk_data).
+_DEFAULT_SUBREDDIT: Final[str] = "LongCovid"
+
+
+def _permalink_from_link_id(link_id: str | None) -> str:
+    """Thread path for a comment when only Reddit ``link_id`` (``t3_<postId>``) is set."""
+    lid = (link_id or "").strip()
+    if not lid.startswith("t3_") or len(lid) <= 3:
+        return ""
+    post_id = lid[3:]
+    if not post_id:
+        return ""
+    return f"/r/{_DEFAULT_SUBREDDIT}/comments/{post_id}/"
+
+
+def _permalink_from_post_chunk_id(chunk_id: str | None) -> str:
+    """Fallback for post chunks: ``chunk_id`` is ``t3_<postId>_<chunkIndex>``."""
+    cid = (chunk_id or "").strip()
+    if not cid.startswith("t3_"):
+        return ""
+    parts = cid.split("_")
+    if len(parts) < 3:
+        return ""
+    post_id = parts[1]
+    if not post_id or not parts[-1].isdigit():
+        return ""
+    return f"/r/{_DEFAULT_SUBREDDIT}/comments/{post_id}/"
+
+
+def _resolved_permalink(r: SearchResult) -> str:
+    """Prefer stored permalink; else derive thread URL from ``link_id`` or post ``chunk_id``."""
+    m = r.metadata
+    raw = (m.permalink or "").strip()
+    if raw:
+        return raw
+    derived = _permalink_from_link_id(m.link_id)
+    if derived:
+        return derived
+    if (m.chunk_type or "").strip().lower() == "post":
+        return _permalink_from_post_chunk_id(r.chunk_id) or _permalink_from_post_chunk_id(m.chunk_id)
+    return ""
+
 
 class CitedSource(BaseModel):
     """One cited chunk for the Links tab / sidebar."""
@@ -88,7 +130,7 @@ def build_cited_sources(
                 num_comments=m.num_comments,
                 post_summary=(m.post_summary or None) if (m.post_summary or "").strip() else None,
                 created_utc=_iso_utc(m.created_utc),
-                permalink=m.permalink or "",
+                permalink=_resolved_permalink(r),
             )
         )
 
