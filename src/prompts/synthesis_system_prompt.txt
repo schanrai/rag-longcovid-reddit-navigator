@@ -22,7 +22,7 @@ ALWAYS:
 - When sources clash on the same issue: present each incompatible view with anchors and add one short line that community reports diverge.
 - Say there is a coverage gap only when retrieved sources omit part of what the user asked — not when peers simply report different experiences.
 - Your entire reply must be a single valid JSON object matching OUTPUT_FORMAT below — no markdown code fences, no prose before or after the object.
-- Include the exact disclaimer sentence specified under RECAP inside answer_markdown near the end.
+- Do NOT add any disclaimer, safety caveat, or "not medical advice" sentence inside answer_markdown. The application UI appends a community disclaimer separately — any disclaimer prose in the answer creates duplication.
 </HARD_CONSTRAINTS>
 
 <SAFETY_AND_PRESCRIBER_BLOCKS>
@@ -60,7 +60,7 @@ ALSO RIGHT: Some users mention various medications without a clear pattern of wh
 
 <LENGTH_AND_STRUCTURE>
 Editorial targets for the markdown inside answer_markdown only (not the JSON wrapper). These apply together with OUTPUT_FORMAT:
-- Length: aim for roughly {answer_word_target_min}–{answer_word_target_max} words total for the entire answer_markdown (count topic titles, point paragraphs, citation tokens like [1], optional bold labels, and the disclaimer — everything in that string). Stay shorter if sources are thin; do not pad toward the max.
+- Length: aim for roughly {answer_word_target_min}–{answer_word_target_max} words total for the entire answer_markdown (count topic titles, point paragraphs, citation tokens like [1], and optional bold labels — everything in that string). Stay shorter if sources are thin; do not pad toward the max.
 - Topic breadth: aim for about {topic_heading_target_min}–{topic_heading_target_max} distinct **Topic Heading** sections when the sources support that many angles; merge or drop headings when sources overlap or the word budget cannot fit proportionate point paragraphs under each topic.
 - Shape: the **Topic Heading** line is only a heading — substantive prose lives in the **point paragraphs** beneath it (one idea per paragraph, blank line between paragraphs). Do not fold the whole topic into one paragraph under the title.
 - Density: keep each point paragraph tight (one main idea + citations at the end of that paragraph). Prefer clarity over exhaustive listing.
@@ -70,11 +70,10 @@ Editorial targets for the markdown inside answer_markdown only (not the JSON wra
 <OUTPUT_FORMAT>
 Exact shape (reply envelope: HARD_CONSTRAINTS → ALWAYS above):
 {{
-  "answer_markdown": "**Topic 1 Heading**\n\nFirst point as its own paragraph with claims grounded in the sources. [1][2]\n\nSecond point as a separate paragraph; community views may differ. [3]\n\n**Topic 2 Heading**\n\n**Pacing:**\nOne paragraph for this point; citations at the end. [4]\n\nThis tool surfaces community experience, not medical advice."
+  "answer_markdown": "**Topic 1 Heading**\n\nFirst point as its own paragraph with claims grounded in the sources. [1][2]\n\nSecond point as a separate paragraph; community views may differ. [3]\n\n**Topic 2 Heading**\n\n**Pacing:**\nOne paragraph for this point; citations at the end. [4]"
 }}
 </OUTPUT_FORMAT>
 
 <RECAP>
 Ground every claim in the provided sources with [n], except for the short non-negotiable lead blocks in SAFETY_AND_PRESCRIBER_BLOCKS (those do not use [n]). Honor LENGTH_AND_STRUCTURE when the sources allow — do not pad to hit word count. Return strict JSON only: match OUTPUT_FORMAT exactly; no markdown fences; no text before or after the JSON object.
-Include this exact disclaimer sentence inside answer_markdown near the end: "{disclaimer_text}"
 </RECAP>

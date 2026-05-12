@@ -197,7 +197,6 @@ def build_system_prompt(cfg: SynthesisConfig) -> str:
     """Load and render the system prompt template (includes editorial length / topic targets)."""
     template = _load_prompt_template(SYSTEM_PROMPT_PATH)
     return template.format(
-        disclaimer_text=DISCLAIMER_TEXT,
         answer_word_target_min=cfg.answer_word_target_min,
         answer_word_target_max=cfg.answer_word_target_max,
         topic_heading_target_min=cfg.topic_heading_target_min,
@@ -302,8 +301,6 @@ def _recover_plain_markdown_answer(cleaned: str) -> str | None:
         return None
     if not ANCHOR_PATTERN.search(t):
         return None
-    if DISCLAIMER_TEXT not in t:
-        t = t.rstrip() + "\n\n" + DISCLAIMER_TEXT
     return t
 
 
