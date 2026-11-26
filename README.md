@@ -100,7 +100,7 @@ python3 src/build_eval_corpus.py
 
 ## FastAPI (Phase 6 — baseline `/health` + `POST /query`)
 
-Requires `.env` with `OPENROUTER_API_KEY`, `VOYAGE_API_KEY`, `WEAVIATE_URL`, and `WEAVIATE_API_KEY` for live `/query`.
+Requires `.env` with `GEMINI_API_KEY`, `VOYAGE_API_KEY`, `WEAVIATE_URL`, and `WEAVIATE_API_KEY` for live `/query`.
 
 **Railway:** `railway.toml` and `Procfile` in the repo root set the web process (`python -m uvicorn … --host 0.0.0.0 --port $PORT`) and `/health` check timeout. **Phase 3 QA gate:** automated `pytest tests/test_phase3_production_readiness.py -v`; manual checklist `docs/deploy-smoke-phase3.md`.
 

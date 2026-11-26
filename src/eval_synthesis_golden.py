@@ -24,7 +24,8 @@ Primary judge: ``EVAL_JUDGE_MODEL`` (default ``anthropic/claude-sonnet-4.6``).
 
 Compare two reports (e.g. baseline vs new run): ``python -m src.compare_golden_iterations --latest 2``.
 
-Requires: OPENROUTER_API_KEY, VOYAGE_API_KEY, Weaviate env (same as pipeline_cli).
+Requires: GEMINI_API_KEY (rewrite and synthesis), OPENROUTER_API_KEY (judge),
+VOYAGE_API_KEY, Weaviate env (same as pipeline_cli).
 """
 from __future__ import annotations
 

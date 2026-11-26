@@ -41,7 +41,7 @@ def test_phase3_offline_app_starts_without_pipeline_env(monkeypatch: pytest.Monk
     (``create_app(connect_weaviate=False)`` + ``get_weaviate_client`` override).
     Lifespan must complete without missing-env crash.
     """
-    for key in ("WEAVIATE_URL", "WEAVIATE_API_KEY", "OPENROUTER_API_KEY", "VOYAGE_API_KEY"):
+    for key in ("WEAVIATE_URL", "WEAVIATE_API_KEY", "GEMINI_API_KEY", "VOYAGE_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     with _offline_client() as client:
         r = client.get("/health")
@@ -51,7 +51,7 @@ def test_phase3_offline_app_starts_without_pipeline_env(monkeypatch: pytest.Monk
 
 def test_phase3_live_startup_requires_pipeline_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Live mode fails fast at startup if required keys are missing."""
-    for key in ("WEAVIATE_URL", "WEAVIATE_API_KEY", "OPENROUTER_API_KEY", "VOYAGE_API_KEY"):
+    for key in ("WEAVIATE_URL", "WEAVIATE_API_KEY", "GEMINI_API_KEY", "VOYAGE_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(RuntimeError, match="Missing required environment variables"):
         with TestClient(create_app(connect_weaviate=True, warmup_reranker=False)):

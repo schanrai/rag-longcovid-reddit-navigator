@@ -11,7 +11,7 @@ import os
 _REQUIRED_FOR_LIVE: tuple[str, ...] = (
     "WEAVIATE_URL",
     "WEAVIATE_API_KEY",
-    "OPENROUTER_API_KEY",
+    "GEMINI_API_KEY",
     "VOYAGE_API_KEY",
 )
 
