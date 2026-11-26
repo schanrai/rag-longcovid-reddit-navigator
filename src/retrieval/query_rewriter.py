@@ -21,18 +21,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Final
 
-import httpx
 from dotenv import load_dotenv
 
 # Allow running as a module or directly
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 load_dotenv(Path(__file__).parent.parent.parent / ".env", override=True)
 
+from src.gemini_client import generate_text
 from src.retrieval.config import RetrievalConfig, RewriterConfig
 from src.retrieval.models import (
     IntentCategory,
@@ -100,47 +99,31 @@ def rewrite(
     Args:
         query:   Raw user query string.
         cfg:     RetrievalConfig (uses defaults if not provided).
-        api_key: OpenRouter API key (falls back to OPENROUTER_API_KEY env var).
+        api_key: Gemini API key (falls back to GEMINI_API_KEY).
 
     Returns:
         RewriteResult with mode, intent, and rewrite candidates.
 
     Raises:
         ValueError: If the API key is missing or the LLM response is malformed.
-        httpx.HTTPError: On network or API failures.
+        GeminiResponseError: The model body is blocked, truncated, or empty.
+        TimeoutError: The request timed out.
+        httpx.HTTPError: On HTTP failures.
     """
     cfg = cfg or RetrievalConfig()
     rcfg: RewriterConfig = cfg.rewriter
 
-    key = api_key or os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if not key:
-        raise ValueError("OPENROUTER_API_KEY is not set")
-
-    payload: dict[str, Any] = {
-        "model": rcfg.model,
-        "temperature": rcfg.temperature,
-        "max_tokens": rcfg.max_tokens,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": query},
-        ],
-    }
-
-    url = f"{rcfg.openrouter_base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": os.environ.get("APP_URL", "http://localhost:3000"),
-    }
-
-    log.debug("Calling OpenRouter: model=%s query=%r", rcfg.model, query)
-
-    with httpx.Client(timeout=rcfg.request_timeout_s) as client:
-        r = client.post(url, headers=headers, json=payload)
-        r.raise_for_status()
-
-    body = r.json()
-    raw = body["choices"][0]["message"]["content"].strip()
+    log.debug("Calling Gemini: model=%s query=%r", rcfg.model, query)
+    raw = generate_text(
+        model=rcfg.model,
+        user_prompt=query,
+        system_prompt=SYSTEM_PROMPT,
+        max_output_tokens=rcfg.max_tokens,
+        api_key=api_key,
+        temperature=rcfg.temperature,
+        timeout_s=rcfg.request_timeout_s,
+        retry_attempts=1,
+    )
     log.debug("Raw LLM response: %s", raw)
 
     return _parse_response(query, raw, cfg)

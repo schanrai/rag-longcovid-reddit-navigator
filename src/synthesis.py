@@ -2,8 +2,8 @@
 """
 synthesis.py — Grounded answer synthesis with citations.
 
-Builds a Gemini-optimized prompt from retrieval output, calls the LLM via
-OpenRouter, and returns a structured response payload for the API/frontend.
+Builds a Gemini-optimized prompt from retrieval output, calls Gemini
+generateContent, and returns a structured response payload for the API/frontend.
 
 Interim telemetry (pre–Module 6): configure the `src.synthesis` logger (or root)
 for your environment. At DEBUG: full system prompt, full user prompt, and raw
@@ -20,12 +20,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator
 
 from src.citation_verifier import verify_citations
-from src.openrouter_retry import post_openrouter_chat_completions
+from src.gemini_client import ThinkingLevel, generate_text
 from src.retrieval.models import RetrievalResult, SearchResult
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,7 +38,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "synthesis_system_prompt.txt"
 USER_PROMPT_PATH = PROMPTS_DIR / "synthesis_user_prompt.txt"
 
-# When the model returns prose or unrecoverable JSON, re-call OpenRouter (same messages)
+# When the model returns prose or unrecoverable JSON, re-call Gemini (same messages)
 # before failing — keeps eval runs from aborting on occasional format slips.
 _SYNTHESIS_PARSE_MAX_ATTEMPTS = 3
 
@@ -76,10 +75,18 @@ class SynthesisResponse(BaseModel):
 
 
 class SynthesisConfig(BaseModel):
-    model: str = "google/gemini-3-flash-preview"
+    model: str = "gemini-3-flash-preview"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     temperature: float = 0.1
     max_tokens: int = 1800
+    thinking_level: ThinkingLevel | None = Field(
+        default="low",
+        description=(
+            "Gemini thinkingConfig.thinkingLevel. Thinking tokens count against max_tokens; "
+            "the model default (high) exhausts the 1800 cap before answering. None sends no "
+            "thinking config."
+        ),
+    )
     timeout_s: float = 60.0
     max_chunks_in_context: int = 25
     retry_attempts: int = Field(
@@ -363,15 +370,16 @@ def generate_synthesis(
     Args:
         retrieval: Retrieval pipeline output (query + ranked results).
         cfg: Optional synthesis config overrides.
-        api_key: Optional OpenRouter key; falls back to OPENROUTER_API_KEY.
+        api_key: Optional Gemini key; falls back to GEMINI_API_KEY.
 
     Raises:
         ValueError: missing key, empty context, invalid LLM output.
+        GeminiResponseError: the model body is blocked, truncated, or empty.
         TimeoutError: all attempts failed due to request timeout (see chained cause).
         httpx.HTTPError: non-retryable HTTP errors or exhausted retries.
         httpx.RequestError: exhausted retries on transport errors.
 
-    On invalid or empty ``answer_markdown`` JSON envelope, the OpenRouter call is
+    On invalid or empty ``answer_markdown`` JSON envelope, the Gemini call is
     retried up to ``_SYNTHESIS_PARSE_MAX_ATTEMPTS`` times (same prompt) before raising.
 
     Logging:
@@ -379,9 +387,9 @@ def generate_synthesis(
         INFO — synthesis citation coverage (chunks), model id, synthesis latency_ms, verifier_latency_ms; verifier anchor keep/remove counts.
     """
     cfg = cfg or SynthesisConfig()
-    key = (api_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
+    key = (api_key or os.environ.get("GEMINI_API_KEY", "")).strip()
     if not key:
-        raise ValueError("OPENROUTER_API_KEY is not set")
+        raise ValueError("GEMINI_API_KEY is not set")
     if not retrieval.results:
         raise ValueError("Retrieval results are empty; cannot synthesize grounded response.")
 
@@ -395,66 +403,53 @@ def generate_synthesis(
     log.debug("synthesis system prompt (full):\n%s", system_prompt)
     log.debug("synthesis user prompt (full):\n%s", user_prompt)
 
-    payload: dict[str, Any] = {
-        "model": cfg.model,
-        "temperature": cfg.temperature,
-        "max_tokens": cfg.max_tokens,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": os.environ.get("APP_URL", "http://localhost:3000"),
-    }
-    url = f"{cfg.openrouter_base_url.rstrip('/')}/chat/completions"
+    model_id = cfg.model.removeprefix("google/")
 
     started = time.perf_counter()
-    body: dict[str, Any] = {}
     answer_markdown = ""
-    with httpx.Client(timeout=cfg.timeout_s) as client:
-        for parse_attempt in range(_SYNTHESIS_PARSE_MAX_ATTEMPTS):
-            response = post_openrouter_chat_completions(
-                client=client,
-                url=url,
-                headers=headers,
-                payload=payload,
-                cfg=cfg,
-                log_label="OpenRouter synthesis",
+    for parse_attempt in range(_SYNTHESIS_PARSE_MAX_ATTEMPTS):
+        raw = generate_text(
+            model=model_id,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_output_tokens=cfg.max_tokens,
+            api_key=key,
+            temperature=cfg.temperature,
+            timeout_s=cfg.timeout_s,
+            retry_attempts=cfg.retry_attempts,
+            retry_base_delay_s=cfg.retry_base_delay_s,
+            retry_max_delay_s=cfg.retry_max_delay_s,
+            thinking_level=cfg.thinking_level,
+        ).strip()
+        log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
+        cleaned = _strip_json_fences(raw)
+        try:
+            parsed = _parse_synthesis_payload(cleaned)
+            answer_markdown = (parsed.get("answer_markdown") or "").strip()
+            if not answer_markdown:
+                raise ValueError("Synthesis model returned empty answer_markdown.")
+        except ValueError as exc:
+            log.warning(
+                "synthesis JSON parse failed (attempt %d/%d): %s",
+                parse_attempt + 1,
+                _SYNTHESIS_PARSE_MAX_ATTEMPTS,
+                exc,
             )
-            body = response.json()
-            raw = body["choices"][0]["message"]["content"].strip()
-            log.debug("synthesis raw LLM response (pre-parse, full):\n%s", raw)
-            cleaned = _strip_json_fences(raw)
-            try:
-                parsed = _parse_synthesis_payload(cleaned)
-                answer_markdown = (parsed.get("answer_markdown") or "").strip()
-                if not answer_markdown:
-                    raise ValueError("Synthesis model returned empty answer_markdown.")
-            except ValueError as exc:
-                log.warning(
-                    "synthesis JSON parse failed (attempt %d/%d): %s",
-                    parse_attempt + 1,
-                    _SYNTHESIS_PARSE_MAX_ATTEMPTS,
-                    exc,
-                )
-                if parse_attempt + 1 >= _SYNTHESIS_PARSE_MAX_ATTEMPTS:
-                    raise
-                time.sleep(min(2.0, 0.5 * (2**parse_attempt)))
-                continue
-            break
+            if parse_attempt + 1 >= _SYNTHESIS_PARSE_MAX_ATTEMPTS:
+                raise
+            time.sleep(min(2.0, 0.5 * (2**parse_attempt)))
+            continue
+        break
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     verifier_removed: list[int] = []
     verifier_ms = 0
     if cfg.verifier_enabled:
+        verifier_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         answer_markdown, verifier_removed, verifier_ms = verify_citations(
             answer_markdown,
             packed_context,
-            api_key=key,
+            api_key=verifier_key,
             cfg=cfg,
         )
 
@@ -469,14 +464,13 @@ def generate_synthesis(
         elapsed_ms,
         verifier_ms,
     )
-    usage = body.get("usage", {})
     metadata = ResponseMetadata(
         model=cfg.model,
         temperature=cfg.temperature,
         latency_ms=elapsed_ms,
-        prompt_tokens=usage.get("prompt_tokens"),
-        completion_tokens=usage.get("completion_tokens"),
-        total_tokens=usage.get("total_tokens"),
+        prompt_tokens=None,
+        completion_tokens=None,
+        total_tokens=None,
         chunks_provided=len(context_results),
         verifier_removed_anchors=verifier_removed,
         verifier_latency_ms=verifier_ms,

@@ -11,7 +11,7 @@ Usage:
     python -m src.pipeline_cli --query "..." -v
 
 Environment:
-    OPENROUTER_API_KEY — query rewrite (+ synthesis unless --retrieve-only)
+    GEMINI_API_KEY — query rewrite (+ synthesis unless --retrieve-only)
     VOYAGE_API_KEY       — query embedding for hybrid search
     Weaviate             — same as hybrid_search / ranking_qa (e.g. WEAVIATE_URL)
 """
@@ -45,7 +45,7 @@ def main() -> None:
     parser.add_argument(
         "--retrieve-only",
         action="store_true",
-        help="Run retrieval only (no OpenRouter call for synthesis)",
+        help="Run retrieval only (no Gemini call for synthesis)",
     )
     parser.add_argument(
         "-v",
@@ -67,8 +67,8 @@ def main() -> None:
     if not voyage_key:
         raise SystemExit("VOYAGE_API_KEY is not set")
 
-    if not os.environ.get("OPENROUTER_API_KEY", "").strip():
-        raise SystemExit("OPENROUTER_API_KEY is not set (required for query rewrite)")
+    if not os.environ.get("GEMINI_API_KEY", "").strip():
+        raise SystemExit("GEMINI_API_KEY is not set (required for query rewrite)")
 
     retrieval_cfg = RetrievalConfig()
     retrieval_cfg.reranker.enabled = True

@@ -28,8 +28,7 @@ INTENT_FRESHNESS: dict[IntentCategory, FreshnessStance] = {
 # ── Query rewriter config ──────────────────────────────────────────────────────
 
 class RewriterConfig(BaseModel):
-    model: str = "google/gemini-2.5-flash-lite"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    model: str = "gemini-3.1-flash-lite"
     temperature: float = 0.2          # low but not zero — slight variation helps with rewrites
     max_tokens: int = 512
     request_timeout_s: float = 30.0
