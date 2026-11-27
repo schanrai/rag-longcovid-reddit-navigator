@@ -8,13 +8,13 @@
 |--------|---------|
 | `id` | Stable ID (`q01` …) — used by eval scripts and judgments |
 | `query` | Natural language question as a user would ask it |
-| `category` | `symptom` \| `treatment` \| `timeline` \| `prevalence` \| `emotional` \| `benefits` \| `meta` |
+| `category` | `symptom` \| `treatment` \| `timeline` \| `prevalence` \| `emotional` \| `benefits` \| `meta` \| `off_topic` \| `safety` \| `edge_case` \| `ambiguous` |
 | `expected_terms` | Hints for search / labeling — terms often present in relevant chunks |
 | `notes` | What “good retrieval” looks like for this query |
 ## Your review
 
 1. Edit queries, categories, `expected_terms`, and `notes` in `golden_queries.json` to match the topics you care about most for the subreddit.
-2. Add, remove, or merge queries as needed — keep `id` values unique and stable if eval data already references them (currently `q01`–`q20`).
+2. Add, remove, or merge queries as needed — keep `id` values unique and stable if eval data already references them (currently `q01`–`q20` core; `q21`–`q30` probes, with `q27`–`q30` underspecified / clarification).
 3. Generate a candidate report (keyword + title hints on real chunks):
 
    ```bash

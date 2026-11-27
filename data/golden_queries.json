@@ -1,6 +1,6 @@
 {
-  "version": 5,
-  "description": "Golden queries for embedding eval and RAG eval (q01–q20) plus adversarial/edge-case probes (q21–q28): off-topic refusal, safety + prescriber blocks (q23–q25), thin retrieval, ambiguity, grounding. q27/q28: underspecified rewriter probes. labeled_relevant optional for Phase 1b.",
+  "version": 6,
+  "description": "Golden queries for embedding eval and RAG eval (q01–q20) plus adversarial/edge-case probes (q21–q30): off-topic refusal, safety + prescriber blocks (q23–q25), thin retrieval, ambiguity, grounding. q27–q30: underspecified rewriter probes (clarification expected on POST /query). labeled_relevant optional for Phase 1b.",
   "queries": [
     {
       "id": "q01",
@@ -224,6 +224,22 @@
       "category": "ambiguous",
       "expected_terms": ["treatment", "lifestyle", "pacing", "diagnostic", "next step", "Long COVID"],
       "notes": "Underspecified intent: no symptom or modality anchor; rewriter should often emit clarification (e.g. treatments vs lifestyle vs diagnostics) in LC context. Synthesis should stay grounded and not invent a single narrow plan without sources.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q29",
+      "query": "LC",
+      "category": "ambiguous",
+      "expected_terms": ["Long COVID", "community", "awareness", "symptoms"],
+      "notes": "Abbreviation-only: LC most often means Long COVID in this product, but the string is entirely underspecified (scope, intent, symptom vs community vs awareness). Rewriter should emit clarification with 2–3 distinct interpretations. Do not silently expand and search.",
+      "labeled_relevant": []
+    },
+    {
+      "id": "q30",
+      "query": "tired",
+      "category": "ambiguous",
+      "expected_terms": ["fatigue", "tired", "exhaustion", "PEM", "sleep", "energy"],
+      "notes": "One-word symptom fragment: could be everyday fatigue, post-exertional malaise, sleep disruption, or a request for community comparison. Rewriter should emit clarification with 2–3 distinct interpretations. Do not assume PEM or a single management plan.",
       "labeled_relevant": []
     }
   ]

@@ -11,7 +11,7 @@ Usage:
     cd projects/rag-longcovid-reddit-navigator
     python -m src.eval_synthesis_golden
     python -m src.eval_synthesis_golden --golden data/golden_queries.json
-    python -m src.eval_synthesis_golden --only q21-q28
+    python -m src.eval_synthesis_golden --only q21-q30
 
 Writes: reports/synthesis_eval/golden_iteration_<N>.json (N auto-increments; separate from
 iteration_<N>.json from eval_synthesis.py).
@@ -79,7 +79,7 @@ def parse_only_filter(spec: str) -> set[str]:
     """
     Parse --only value: comma-separated ids and/or inclusive ranges.
 
-    Examples: ``q21-q28``, ``q01,q05-q08``, ``q3`` (normalized to ``q03``).
+        Examples: ``q21-q30``, ``q01,q05-q08``, ``q3`` (normalized to ``q03``).
     """
     spec = spec.strip()
     if not spec:
@@ -475,7 +475,7 @@ def main() -> None:
         metavar="SPEC",
         help=(
             "Run only these golden ids (comma-separated). Each token is qNN or inclusive "
-            "range qNN-qMM, e.g. q21-q28 or q01,q05-q08. Ids are normalized (q5 → q05)."
+            "range qNN-qMM, e.g. q21-q30 or q01,q05-q08. Ids are normalized (q5 → q05)."
         ),
     )
     ap.add_argument(
