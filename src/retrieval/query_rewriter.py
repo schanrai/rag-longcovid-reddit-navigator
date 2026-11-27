@@ -123,6 +123,7 @@ def rewrite(
         temperature=rcfg.temperature,
         timeout_s=rcfg.request_timeout_s,
         retry_attempts=1,
+        thinking_level=rcfg.thinking_level,
     )
     log.debug("Raw LLM response: %s", raw)
 

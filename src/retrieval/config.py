@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from src.gemini_client import ThinkingLevel
+
 from .models import FreshnessStance, IntentCategory
 
 
@@ -28,9 +30,24 @@ INTENT_FRESHNESS: dict[IntentCategory, FreshnessStance] = {
 # ── Query rewriter config ──────────────────────────────────────────────────────
 
 class RewriterConfig(BaseModel):
-    model: str = "gemini-3.1-flash-lite"
+    model: str = Field(
+        default="gemini-3-flash-preview",
+        description=(
+            "Locked 2026-11-26. If this preview id is retired, fall back to "
+            "gemini-3.6-flash at thinking_level=minimal (same 512 cap). See build plan "
+            "open question 22."
+        ),
+    )
     temperature: float = 0.2          # low but not zero — slight variation helps with rewrites
     max_tokens: int = 512
+    thinking_level: ThinkingLevel | None = Field(
+        default="minimal",
+        description=(
+            "Gemini thinkingConfig.thinkingLevel. Required at the 512 cap: omitting it "
+            "lets Gemini 3 Flash Preview default thinking exhaust max_tokens (MAX_TOKENS). "
+            "None sends no thinking config."
+        ),
+    )
     request_timeout_s: float = 30.0
     ambiguity_threshold: float = 0.75 # confidence below this → clarification mode
 
