@@ -94,7 +94,7 @@ def retrieve(
     cfg: RetrievalConfig | None = None,
     preset: RankingPreset = RankingPreset.MOST_RELEVANT,
     voyage_api_key: str | None = None,
-    openrouter_api_key: str | None = None,
+    gemini_api_key: str | None = None,
     weaviate_client: weaviate.WeaviateClient | None = None,
 ) -> RetrievalResult:
     """
@@ -113,8 +113,8 @@ def retrieve(
         ranking weights (those come from ``cfg.ranking``).
     voyage_api_key:
         Passed to hybrid search; falls back to ``VOYAGE_API_KEY``.
-    openrouter_api_key:
-        Passed to the rewriter; falls back to ``OPENROUTER_API_KEY``.
+    gemini_api_key:
+        Passed to the rewriter; falls back to ``GEMINI_API_KEY``.
     weaviate_client:
         Optional Weaviate client. When omitted, ``hybrid_search.search`` builds
         and closes its own client for this call.
@@ -125,7 +125,7 @@ def retrieve(
         ``query`` is the ``RewriteResult``; ``results`` are ranked chunks.
     """
     cfg = cfg or RetrievalConfig()
-    rewrite_result = rewrite(user_query, cfg=cfg, api_key=openrouter_api_key)
+    rewrite_result = rewrite(user_query, cfg=cfg, api_key=gemini_api_key)
     return retrieve_from_rewrite(
         rewrite_result,
         search_query=rewrite_result.best_rewrite.query,
